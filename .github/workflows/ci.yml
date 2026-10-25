@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: go vet
+        run: go vet ./...
+      - name: build
+        run: go build ./...
+      - name: test
+        run: go test ./... -v
+      - name: baseline (smoke)
+        run: |
+          go build -o bin/echo ./cmd/echo
+          go build -o bin/waf ./cmd/waf
+          ./bin/echo -listen :9000 &
+          ./bin/waf -listen :8080 -upstream http://127.0.0.1:9000 -log logs/waf.jsonl &
+          sleep 2
+          curl -sf http://127.0.0.1:8080/__waf/health > /dev/null
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/p?id=1%20UNION%20SELECT%201")
+          test "$code" = "403"
