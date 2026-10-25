@@ -3,7 +3,7 @@
 > 一个用 Go 写的**反向代理式 WAF**，配套本地靶场与对抗驱动脚本：用于研究「攻击 → 拦截 → 绕过 → 补规则」的完整对抗循环。
 > 全部测试仅针对本地靶场与自建环境。
 
-![ci](https://github.com/YDcherish/bypasslab/actions/workflows/ci.yml/badge.svg)
+![ci](https://github.com/yliucherish/bypasslab/actions/workflows/ci.yml/badge.svg)
 ![go](https://img.shields.io/badge/Go-1.22%2B-00ADD8)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -74,6 +74,21 @@ curl -i "http://127.0.0.1:8080/product?id=1%20UNION%20SELECT%20password%20FROM%2
 
 内部端点：`/__waf/health`（规则数、未启动时长、放行数）、`/__waf/stats`（按规则统计拦截数）。
 
+### W2 对抗驱动器
+
+把内置语料库（108 条：84 攻击 + 24 良性对照）批量打向 WAF，输出结果矩阵与报告：
+
+```bash
+# 一键复现（自己起靶场与 WAF，跑完自动清理）
+bash scripts/run_w2.sh
+
+# 或手动指定目标
+go run ./cmd/attack -target http://127.0.0.1:8080 -csv out/w2_matrix.csv -md out/w2_report.md
+```
+
+产物：`out/w2_matrix.csv`（逐条明细：状态码 / 是否拦截 / 命中规则 / 命中层 / 耗时）、
+`out/w2_report.md`（分类拦截率、规则分布、绕过清单、误报清单）。
+
 ## 内置规则（W1）
 
 | 规则 ID | 名称 | 类别 | 等级 |
@@ -114,14 +129,44 @@ shell 元字符、命令名、`../` 序列、敏感文件、Java 反序列化魔
 2. **单字段恒真式漏报**：`?id=1' or 1=1` 仅积 4 分（阈值 5）→ 漏拦。修法不是降阈值（会误伤），
    而是把恒真式权重提到 4，叠加 comment 特征即达 5；单纯出现 `'or'` 仍不拦。
 
+## W2 对抗矩阵（实测，非估算）
+
+对 108 条语料跑一轮：**攻击拦截率 79.8%（67/84）｜ 良性误报率 0%（0/24）｜ 执行错误 0**
+
+| 类别 | 拦截/总数 | 拦截率 | 说明 |
+|---|---|---|---|
+| path-traversal | 10/10 | **100%** | 正则 + 敏感文件名双保险 |
+| scanner | 8/8 | **100%** | UA 指纹稳定命中 |
+| sqli | 18/21 | 86% | 缺 stacked / OUTFILE / `'1'='1'` 变体 |
+| rce | 10/12 | 83% | 单竖线 `\|cmd` 与系统命令解释器未覆盖 |
+| deserialization | 8/10 | 80% | `${lower:}` 混淆与裸 Java 魔数漏检 |
+| xss | 12/15 | 80% | `javascript:` 伪协议与 `ontoggle` 未覆盖 |
+| **ssrf** | **1/8** | **12%** | **最大短板：语义层只给 2 分，单特征不达阈值 5** |
+| benign | 0/24 | 0%（误报） | 含 `select`/`union` 单词、含引号文本等均放行 |
+
+### 这一轮暴露的 4 个真问题（W3 的输入）
+
+1. **SSRF 几乎不设防**：`127.0.0.1`、`169.254.169.254`、`gopher://` 等 7 条全部放行。
+   根因是语义层 `ssrf:internal-ip` 权重只有 2，单特征永远到不了阈值 5——**单一强特征也该能独立定罪**。
+2. **单竖线命令拼接漏检**：规则只覆盖 `;`、`&&`、`||`，漏了 `|`。
+3. **`'1'='1'` 型恒真式漏检**：`isTautology` 只匹配「数字=数字」与 `'or'='or`，没覆盖引号包裹的数字。
+4. **JNDI 混淆变形**：`${${lower:j}ndi:...}` 未在归一化层展开。
+
+误报为 0 说明**当前阈值没有过紧**，W3 有加权的空间。
+
 ## 目录结构
 
 ```
 bypasslab/
 ├── cmd/waf/          # WAF 启动入口（flag 配置）
 ├── cmd/echo/         # 本地靶场（无过滤回显，仅供授权测试）
+├── cmd/attack/       # W2 对抗驱动器（批量打 WAF，出矩阵与报告）
 ├── internal/waf/     # 核心：归一化 / 规则引擎 / 审计 / 反向代理
+├── internal/payloads/# W2 攻击语料库（含良性对照组）
+├── internal/attack/  # W2 驱动器与统计
 ├── scripts/demo_w1.sh# W1 基线验收脚本
+├── scripts/run_w2.sh # W2 一键复现
+├── out/              # W2 产物：矩阵 CSV 与报告 MD
 ├── logs/             # waf.jsonl 拦截日志（JSONL，可被 SentinelWatch 采集）
 └── .github/workflows/ci.yml
 ```
@@ -129,7 +174,7 @@ bypasslab/
 ## 路线图
 
 - [x] **W1** WAF MVP：反向代理 + 12 条正则规则 + 16 项语义特征 + JSONL 审计 + 限流 + 15 用例基线
-- [ ] **W2** 对抗驱动器：接入 VulnHunter payload 库，自动批量打 WAF 并记录放行/拦截
+- [x] **W2** 对抗驱动器：108 条语料批量打 WAF，输出矩阵与报告（拦截率 79.8%、误报 0%），产出 4 项待修缺口
 - [ ] **W3** 对抗循环 ×3：按放行样本补规则 → 复测 → 输出拦截率曲线
 - [ ] **W4** 报告生成 + SentinelWatch 日志联动看板 + 开源发布
 

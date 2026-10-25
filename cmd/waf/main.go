@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/ydcherish/bypasslab/internal/waf"
+	"github.com/yliucherish/bypasslab/internal/waf"
 )
 
 func main() {
