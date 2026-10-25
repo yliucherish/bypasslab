@@ -24,9 +24,13 @@ func main() {
 	mdOut := flag.String("md", "out/w2_report.md", "Markdown 报告路径")
 	conc := flag.Int("c", 8, "并发数")
 	timeout := flag.Duration("timeout", 5*time.Second, "单请求超时")
+	hard := flag.Bool("hard", false, "追加 W3 更难变形语料（用于检验泛化能力）")
 	flag.Parse()
 
 	cases := payloads.Corpus()
+	if *hard {
+		cases = append(cases, payloads.HardCases()...)
+	}
 	if len(cases) == 0 {
 		log.Fatal("语料库为空")
 	}

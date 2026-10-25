@@ -229,6 +229,15 @@ func builtinSemanticChecks() []semanticCheck {
 		{"sql:time-based", "sqli", SevCritical, 3, contains("sleep(", "benchmark(", "pg_sleep(", "waitfor delay")},
 		{"sql:metadata", "sqli", SevMedium, 2, contains("information_schema", "sysobjects", "load_file(", "into outfile")},
 		{"sql:comment-stripped", "sqli", SevMedium, 1, contains("or 1=1", "and 1=1", "' or '", "\" or \"")},
+		// 引号包裹的恒真式（'1'='1'）：与数字恒真式分开计分，避免单靠 4 分差一点不到阈值。
+		{"sql:quoted-eq", "sqli", SevHigh, 3, func(s string) bool {
+			for _, m := range reQuotedPair.FindAllStringSubmatch(strings.ToLower(s), -1) {
+				if strings.TrimSpace(m[2]) != "" && strings.TrimSpace(m[2]) == strings.TrimSpace(m[5]) {
+					return true
+				}
+			}
+			return false
+		}},
 		{"xss:script-tag", "xss", SevHigh, 3, contains("<script", "<svg", "<iframe", "<img src=x")},
 		{"xss:event-handler", "xss", SevHigh, 2, contains("onerror=", "onload=", "onclick=", "onfocus=")},
 		{"xss:js-uri", "xss", SevMedium, 2, contains("javascript:", "data:text/html")},
@@ -246,11 +255,20 @@ func builtinSemanticChecks() []semanticCheck {
 // 因此"两侧是否相同"（1=1、2=2）放到 isTautology 里用字符串比较完成。
 var reTautologyPair = regexp.MustCompile(`(\d+)\s*=\s*(\d+)`)
 
-// isTautology 判定 SQL 恒真式（1=1 / 'or'='or），这是最经典的逻辑绕过特征。
+// reQuotedPair 匹配 'x'='x' / "x"="x" 形式；是否恒真同样在 Go 侧比较。
+// W2 实测发现 `1' AND '1'='1' --` 能绕过，故补上这一形态。
+var reQuotedPair = regexp.MustCompile(`(['"])([^'"]{1,12})(['"])\s*=\s*(['"])([^'"]{1,12})(['"])`)
+
+// isTautology 判定 SQL 恒真式（1=1 / 'or'='or / '1'='1'）。
 func isTautology(s string) bool {
 	low := strings.ToLower(s)
 	for _, m := range reTautologyPair.FindAllStringSubmatch(low, -1) {
 		if m[1] == m[2] {
+			return true
+		}
+	}
+	for _, m := range reQuotedPair.FindAllStringSubmatch(low, -1) {
+		if strings.TrimSpace(m[2]) == strings.TrimSpace(m[5]) && m[2] != "" {
 			return true
 		}
 	}
@@ -273,12 +291,16 @@ func BuiltinRules() []Rule {
 			Targets: all, Pattern: `(extractvalue|updatexml|geometrycollection)\s*\(`},
 		{ID: "BL-SQLI-003", Name: "布尔/时间盲注", Category: "sqli", Severity: SevCritical, Action: ActionBlock,
 			Targets: all, Pattern: `(sleep|benchmark|pg_sleep)\s*\(\s*\d`},
+		{ID: "BL-SQLI-004", Name: "写文件 / 数据库结构破坏", Category: "sqli", Severity: SevCritical, Action: ActionBlock,
+			Targets: all, Pattern: `into\s+(out|dump)file|;\s*(drop|alter|truncate|create)\s+(table|database|user|index)`},
 		{ID: "BL-XSS-001", Name: "Script 标签", Category: "xss", Severity: SevHigh, Action: ActionBlock,
 			Targets: all, Pattern: `<script[^>]*>`},
 		{ID: "BL-XSS-002", Name: "事件处理器注入", Category: "xss", Severity: SevHigh, Action: ActionBlock,
-			Targets: all, Pattern: `\bon(error|load|focus|mouseover|click)\s*=`},
+			Targets: all, Pattern: `\bon(error|load|focus|blur|mouseover|click|toggle|animationstart|input|submit)\s*=`},
+		{ID: "BL-XSS-003", Name: "JS 伪协议", Category: "xss", Severity: SevHigh, Action: ActionBlock,
+			Targets: all, Pattern: `(javascript|vbscript)\s*:|data:text/html`},
 		{ID: "BL-RCE-001", Name: "命令拼接", Category: "rce", Severity: SevCritical, Action: ActionBlock,
-			Targets: all, Pattern: `(;|&&|\|\|)\s*(cat|ls|id|whoami|uname|ping|curl|wget|nc)\b`},
+			Targets: all, Pattern: `(;|\||&&)\s*(cat|ls|id|whoami|uname|ping|curl|wget|nc|bash|sh|cmd|powershell)\b`},
 		{ID: "BL-RCE-002", Name: "命令替换", Category: "rce", Severity: SevCritical, Action: ActionBlock,
 			Targets: all, Pattern: `(\$\([^)]{1,40}\)|` + "`[^`]{1,40}`" + `)`},
 		{ID: "BL-TRAV-001", Name: "路径遍历", Category: "path-traversal", Severity: SevHigh, Action: ActionBlock,
@@ -289,6 +311,12 @@ func BuiltinRules() []Rule {
 			Targets: all, Pattern: `\$\{jndi:(ldap|rmi|dns|iiop)`},
 		{ID: "BL-DESER-002", Name: "Fastjson autoType", Category: "deserialization", Severity: SevHigh, Action: ActionBlock,
 			Targets: all, Pattern: `"@type"\s*:\s*"`},
+		{ID: "BL-DESER-003", Name: "Java 序列化魔数（base64）", Category: "deserialization", Severity: SevHigh, Action: ActionBlock,
+			Targets: all, Pattern: `rO0AB[A-Za-z0-9+/]{8,}`},
+		// W2 实测 SSRF 仅 12%：语义层单特征权重不足，这里给一条独立正则兜底。
+		// 只匹配"危险协议 + 内网/元数据地址"的组合，避免误伤正常外链回调。
+		{ID: "BL-SSRF-001", Name: "SSRF 内网/元数据地址", Category: "ssrf", Severity: SevHigh, Action: ActionBlock,
+			Targets: all, Pattern: `(https?|gopher|dict|ftp|file)://(127\.\d|localhost|0\.0\.0\.0|169\.254\.169\.254|\[::1\]|10\.\d|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)`},
 		{ID: "BL-SCAN-001", Name: "扫描器指纹", Category: "scanner", Severity: SevMedium, Action: ActionBlock,
 			Targets: withUA, Pattern: `(sqlmap|nikto|nmap|masscan|nessus|acunetix|dirbuster|gobuster|nuclei|xray|zgrab)`},
 	}

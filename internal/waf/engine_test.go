@@ -80,8 +80,8 @@ func TestBenignPass(t *testing.T) {
 // TestRuleCount 内置规则数量（新增规则时同步更新，避免文档与实现漂移）。
 func TestRuleCount(t *testing.T) {
 	e := NewEngine(nil)
-	if got := len(e.Rules()); got != 12 {
-		t.Fatalf("内置规则数 = %d, want 12（修改规则集请同步 README 与 SPEC）", got)
+	if got := len(e.Rules()); got != 16 {
+		t.Fatalf("内置规则数 = %d, want 16（修改规则集请同步 README 与 SPEC）", got)
 	}
 }
 
