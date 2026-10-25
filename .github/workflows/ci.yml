@@ -22,11 +22,14 @@ jobs:
         run: go test ./... -v
       - name: baseline (smoke)
         run: |
+          # bin/ 与 logs/ 被 .gitignore 忽略，干净检出时不存在，必须先建
+          mkdir -p bin logs
           go build -o bin/echo ./cmd/echo
           go build -o bin/waf ./cmd/waf
           ./bin/echo -listen :9000 &
           ./bin/waf -listen :8080 -upstream http://127.0.0.1:9000 -log logs/waf.jsonl &
-          sleep 2
-          curl -sf http://127.0.0.1:8080/__waf/health > /dev/null
+          sleep 3
+          curl -sf http://127.0.0.1:8080/__waf/health || { echo "健康检查失败"; exit 1; }
           code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/p?id=1%20UNION%20SELECT%201")
+          echo "UNION payload 返回码: $code（期望 403）"
           test "$code" = "403"
