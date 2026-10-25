@@ -190,6 +190,45 @@ shell 元字符、命令名、`../` 序列、敏感文件、Java 反序列化魔
 **共性结论**：能挡住「已知写法」，挡不住「同一语义的另一种写法」。规则层的天花板就在这里——
 这也解释了为什么工业界会走到语义/语法分析（AST）与行为检测。
 
+## W4 报告与联动
+
+### HTML 报告（自包含，可直接双击打开）
+
+```bash
+# 一键：跑第三轮 + 渲染三轮对比报告
+bash scripts/run_w4.sh
+
+# 或用已有矩阵渲染
+go run ./cmd/report \
+  -rounds "R1 基线:out/w2_matrix.csv,R2 补规则:out/w3_round2_matrix.csv,R3 换硬语料:out/w3_round3_matrix.csv" \
+  -out out/w4_report.html
+```
+
+报告内容：KPI 卡片（拦截率 / 误报率 / 样本量 / 剩余绕过）、三轮拦截率折线、
+本轮各类别拦截率（短板在前）、规则命中分布、绕过清单、误报清单、三轮汇总表。
+样式内联、图表是手写 SVG，**没有任何 CDN 依赖**，离线可看、可直接截图放进 PPT。
+
+### 与 SentinelWatch 的联动接口
+
+BypassLab 的拦截日志与 SentinelWatch 的采集协议字段对齐，因此不需要额外改造：
+
+| BypassLab 字段 | 含义 | SentinelWatch 侧用途 |
+|---|---|---|
+| `event_type` | `waf_block` / `waf_allow` | 事件分类依据 |
+| `src_ip` | 客户端 IP（支持 X-Forwarded-For） | 关联暴力破解 / 扫描行为 |
+| `rule_id` / `category` / `severity` | 命中规则与危害等级 | 告警去重与分级 |
+| `target` | 命中部位（path/query/body/ua/headers） | 判断攻击面 |
+| `excerpt` | 命中片段（截断 120 字符） | 人工复核 |
+| `ts` | UTC 时间戳 | 时间窗口聚合 |
+
+联动方式（两条，任选）：
+
+1. **文件管道**：`logs/waf.jsonl` 直接作为 SentinelWatch 的日志源（其 FIM/日志采集器按行读取 JSON）
+2. **实时转发**：把 `-log` 指向命名管道，或让 SentinelWatch 侧 tail 该文件
+
+> 状态：字段契约已实现并写入 W1；真正的双系统联调需要 SentinelWatch 仓库一起跑（本机暂无该仓库），
+> 待仓库可访问后补一张「WAF 拦截 → 看板告警」的联动截图。
+
 ## 目录结构
 
 ```
@@ -197,11 +236,13 @@ bypasslab/
 ├── cmd/waf/          # WAF 启动入口（flag 配置）
 ├── cmd/echo/         # 本地靶场（无过滤回显，仅供授权测试）
 ├── cmd/attack/       # W2 对抗驱动器（批量打 WAF，出矩阵与报告）
+├── cmd/report/       # W4 HTML 报告生成（三轮对比 + SVG 图表）
 ├── internal/waf/     # 核心：归一化 / 规则引擎 / 审计 / 反向代理
 ├── internal/payloads/# W2 攻击语料库（含良性对照组）
 ├── internal/attack/  # W2 驱动器与统计
 ├── scripts/demo_w1.sh# W1 基线验收脚本
 ├── scripts/run_w2.sh # W2 一键复现
+├── scripts/run_w4.sh # W4 一键复现（跑第三轮 + 出 HTML）
 ├── out/              # W2 产物：矩阵 CSV 与报告 MD
 ├── logs/             # waf.jsonl 拦截日志（JSONL，可被 SentinelWatch 采集）
 └── .github/workflows/ci.yml
@@ -212,7 +253,7 @@ bypasslab/
 - [x] **W1** WAF MVP：反向代理 + 12 条正则规则 + 16 项语义特征 + JSONL 审计 + 限流 + 15 用例基线
 - [x] **W2** 对抗驱动器：108 条语料批量打 WAF，输出矩阵与报告（拦截率 79.8%、误报 0%），产出 4 项待修缺口
 - [x] **W3** 对抗循环 ×3：R1 79.8% → R2 100%（108 条同语料）→ R3 91.2%（换 126 条更难语料），误报全程 0%
-- [ ] **W4** 报告生成 + SentinelWatch 日志联动看板 + 开源发布
+- [x] **W4** 报告生成（HTML，自包含 SVG 图表）；SentinelWatch 字段契约与联动方式写入 README（双系统联调待对端仓库）；博客第 5 篇完稿
 
 ## 授权声明
 
