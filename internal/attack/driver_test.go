@@ -70,13 +70,13 @@ func TestCorpusRunsAgainstWAF(t *testing.T) {
 	if sum.Total != len(cases) || sum.Attacks+sum.Benign != sum.Total {
 		t.Fatalf("统计不自洽: total=%d attacks=%d benign=%d", sum.Total, sum.Attacks, sum.Benign)
 	}
-	// W2 基线（2026-10-26 实测）：拦截率 79.8%、误报 0。这里只做回归保护，
-	// 低于 75% 说明规则被改坏了；真正的提升目标放在 W3（补规则后重测）。
-	if sum.BlockRate() < 0.75 {
-		t.Fatalf("攻击拦截率 %.1f%% < 75%%，规则可能退化", sum.BlockRate()*100)
+	// v1.1 审计修复后基线（2026-10-26 实测）：112 条语料、拦截率 100%、误报 0。
+	// AUDIT P2-3：门槛从 75% 提到 95%，并强制误报为 0——旧门槛低到规则退化到 80% 都不会红。
+	if sum.BlockRate() < 0.95 {
+		t.Fatalf("攻击拦截率 %.1f%% < 95%%，规则可能退化", sum.BlockRate()*100)
 	}
-	if sum.BenignBlocked > 3 {
-		t.Fatalf("误报 %d 条（>3），需收紧语义阈值", sum.BenignBlocked)
+	if sum.BenignBlocked != 0 {
+		t.Fatalf("误报 %d 条，误报是硬约束（必须为 0）", sum.BenignBlocked)
 	}
 }
 
@@ -124,4 +124,45 @@ func firstErr(rs []Result) string {
 		}
 	}
 	return ""
+}
+
+// TestRateLimitedIsErrorNotBypass AUDIT P2-1：429 既不是拦截也不是放行，
+// 必须记为执行错误，否则会被算成"绕过"把拦截率压低。
+func TestRateLimitedIsErrorNotBypass(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	d := NewDriver(srv.URL, 0)
+	res := d.send(context.Background(), payloads.Case{
+		ID: "T-429", Category: "sqli", Name: "限流响应", Method: "GET", Path: "/p", Query: "id=1", IsAttack: true,
+	})
+	if res.Blocked {
+		t.Fatal("429 被误判成拦截")
+	}
+	if res.Err == "" {
+		t.Fatal("429 未被记为执行错误，会被当成绕过计入分母")
+	}
+	sum := Summarize([]Result{res})
+	if sum.Errors != 1 || sum.Attacks != 0 {
+		t.Fatalf("统计口径错误: errors=%d attacks=%d（429 不应进攻击分母）", sum.Errors, sum.Attacks)
+	}
+}
+
+// TestOversizeBlockedCountsAsBlocked AUDIT P0-1 配套：413 + 规则头应算拦截。
+func TestOversizeBlockedCountsAsBlocked(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-BypassLab-Blocked", "BL-OVERSIZE")
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+	}))
+	defer srv.Close()
+
+	d := NewDriver(srv.URL, 0)
+	res := d.send(context.Background(), payloads.Case{
+		ID: "T-BIG", Category: "sqli", Name: "超大 body", Method: "POST", Path: "/p", Body: "x", IsAttack: true,
+	})
+	if !res.Blocked {
+		t.Fatalf("413 + 规则头未判定为拦截: status=%d rule=%q", res.StatusCode, res.RuleID)
+	}
 }

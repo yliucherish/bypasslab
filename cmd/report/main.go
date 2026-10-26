@@ -33,6 +33,7 @@ type row struct {
 	Layer    string
 	Latency  int64
 	Payload  string
+	Err      string
 }
 
 // round 是一轮实验的统计结果。
@@ -43,6 +44,7 @@ type round struct {
 	Blocked    int
 	Benign     int
 	FalsePos   int
+	Errors     int
 	ByCategory map[string][2]int // 类别 -> {拦截数, 总数}
 	ByRule     map[string]int
 	Bypasses   []row
@@ -112,16 +114,24 @@ func readCSV(path string) ([]row, error) {
 	}
 	var out []row
 	for i, rec := range records {
-		if i == 0 || len(rec) < 11 {
+		// AUDIT P2-2：旧条件 len(rec) < 11 却访问 rec[11]，遇到 11 列畸形行会 panic。
+		// 列序为 id,category,name,is_attack,method,path,query_or_body,status,blocked,
+		// rule_id,layer,latency_ms,error（13 列）；error 列兼容缺失。
+		if i == 0 || len(rec) < 12 {
 			continue
 		}
 		status, _ := strconv.Atoi(rec[7])
 		lat, _ := strconv.ParseInt(rec[11], 10, 64)
+		errStr := ""
+		if len(rec) > 12 {
+			errStr = rec[12]
+		}
 		out = append(out, row{
 			ID: rec[0], Category: rec[1], Name: rec[2],
 			IsAttack: rec[3] == "true",
 			Status:   status, Blocked: rec[8] == "true",
 			RuleID: rec[9], Layer: rec[10], Payload: rec[6], Latency: lat,
+			Err: errStr,
 		})
 	}
 	return out, nil
@@ -130,6 +140,12 @@ func readCSV(path string) ([]row, error) {
 func summarize(label string, rows []row) round {
 	r := round{Label: label, ByCategory: map[string][2]int{}, ByRule: map[string]int{}}
 	for _, x := range rows {
+		// AUDIT L4：执行错误（超时 / 429 限流）的样本不进分母，
+		// 否则会被当成"未被拦截"计入绕过清单，让报告的拦截率失真。
+		if x.Err != "" {
+			r.Errors++
+			continue
+		}
 		r.Total++
 		c := r.ByCategory[x.Category]
 		c[1]++

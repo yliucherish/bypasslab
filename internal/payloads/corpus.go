@@ -225,7 +225,10 @@ func Corpus() []Case {
 		add(ua(n("W2-SCAN", i+1), "scanner", "UA 指纹 "+itoa(i+1), s))
 	}
 
-	// ========== 良性对照（24 条，用于误报率）==========
+	// ========== 良性对照（28 条，用于误报率）==========
+	// AUDIT P1-5：24-28 是本次审查后新增的误报面样本（只增不删，历史基线不受影响）。
+	// 它们专打"正文讨论安全话题"这一类误报：技术文档里出现 javascript:、nmap 等词，
+	// 不应被当成攻击。
 	benign := []Case{
 		q(n("W2-BENIGN", 1), "benign", "普通列表查询", "page=2&size=20", false),
 		q(n("W2-BENIGN", 2), "benign", "搜索英文关键词", "q=golang+http+proxy", false),
@@ -252,6 +255,11 @@ func Corpus() []Case {
 			UA: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36", IsAttack: false},
 		q(n("W2-BENIGN", 23), "benign", "分页大值", "page=999&size=100", false),
 		q(n("W2-BENIGN", 24), "benign", "搜索引号包裹", "q="+urlEnc(`"network security"`), false),
+		// ---- AUDIT P1-5 新增（4 条，只增不删）----
+		b(n("W2-BENIGN", 25), "benign", "正文讨论 js 伪协议", `{"doc":"javascript:void(0) 常用于阻止链接默认跳转"}`, false),
+		b(n("W2-BENIGN", 26), "benign", "正文提到扫描器名", `{"doc":"工具对比：nmap 端口扫描、sqlmap 注入检测、nikto Web 检查"}`, false),
+		q(n("W2-BENIGN", 27), "benign", "路径含加号", "/tag/c%2B%2B", false),
+		b(n("W2-BENIGN", 28), "benign", "正文含等式说明", `{"doc":"表达式 1=1 在集合论里表示全集"}`, false),
 	}
 	add(benign...)
 

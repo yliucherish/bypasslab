@@ -21,7 +21,8 @@ type Action string
 
 const (
 	ActionBlock Action = "block"
-	ActionLog   Action = "log" // 只记录不拦截（用于观察期规则）
+	ActionLog   Action = "log"  // 只记录不拦截（用于观察期规则）
+	ActionPass  Action = "pass" // 放行（配合 waf_allow 事件写入）
 )
 
 // Rule 是 Layer 1 的正则规则。
@@ -97,21 +98,47 @@ func (e *Engine) Rules() []Rule {
 	return out
 }
 
+// Threshold 返回语义层当前的拦截阈值（供 health 端点与实验记录使用）。
+func (e *Engine) Threshold() int { return e.SemanticScore }
+
+// SetThreshold 覆盖语义层阈值。AUDIT P2-4：让"调权重 → 重跑矩阵"成为可复现实验，
+// 而不是改代码重编译。
+func (e *Engine) SetThreshold(n int) {
+	if n > 0 {
+		e.SemanticScore = n
+	}
+}
+
+// fieldCache 缓存一次 Inspect 内的字段归一化结果。
+// AUDIT L5：修复"同一字段被每条规则重复 Normalize"的性能浪费。
+// 注意：仅在一次 Inspect 内使用，不可跨请求共享（非并发安全）。
+type fieldCache map[Target]string
+
+func (c fieldCache) get(r *Request, t Target) string {
+	if v, ok := c[t]; ok {
+		return v
+	}
+	v := r.Field(t)
+	c[t] = v
+	return v
+}
+
 // Inspect 依次跑两层检测。返回 nil 表示放行。
 func (e *Engine) Inspect(req *Request) *Match {
-	if m := e.inspectRegex(req); m != nil && m.Action == ActionBlock {
+	f := fieldCache{}
+	if m := e.inspectRegex(req, f); m != nil && m.Action == ActionBlock {
 		return m
 	}
-	if m := e.inspectSemantic(req); m != nil && m.Action == ActionBlock {
+	if m := e.inspectSemantic(req, f); m != nil && m.Action == ActionBlock {
 		return m
 	}
 	return nil
 }
 
-func (e *Engine) inspectRegex(req *Request) *Match {
+func (e *Engine) inspectRegex(req *Request, f fieldCache) *Match {
 	for _, r := range e.rules {
 		for _, t := range r.Targets {
-			field := req.Field(t)
+			field := f.get(req, t)
 			if field == "" {
 				continue
 			}
@@ -130,41 +157,48 @@ func (e *Engine) inspectRegex(req *Request) *Match {
 // inspectSemantic 累加语义特征权重，达到阈值即判定拦截。
 // 这样设计的原因是：单个特征词（如 select）在正常业务里也可能出现，
 // 但 "select + union + 引号不闭合" 同时出现时，误报率会显著下降。
-func (e *Engine) inspectSemantic(req *Request) *Match {
-	var (
-		score    int
-		hitNames []string
-		hitCat   string
-		hitSev   Severity = SevLow
-		hitTgt   Target
-	)
+//
+// 计分口径（AUDIT M5，方案 A）：**按 target 独立计分**，任一字段单独达到阈值即拦截。
+// 旧实现把所有字段的分数加总到同一个 score，会出现"query 4 分 + body 无关 1 分 = 拦截"
+// 这种跨字段凑分，既抬高误报又让归因失准。
+func (e *Engine) inspectSemantic(req *Request, f fieldCache) *Match {
+	best := &Match{}
+	hit := false
 	for _, t := range []Target{TargetPath, TargetQuery, TargetBody, TargetUA, TargetHeaders} {
-		field := req.Field(t)
+		field := f.get(req, t)
 		if field == "" {
 			continue
 		}
+		var (
+			score    int
+			hitNames []string
+			hitCat   string
+			hitSev   Severity = SevLow
+		)
 		for _, c := range e.semanticChecks {
 			if c.fn(field) {
 				score += c.weight
 				hitNames = append(hitNames, c.name)
 				if hitCat == "" {
 					hitCat = c.category
-					hitTgt = t
 				}
 				if sevRank(c.severity) > sevRank(hitSev) {
 					hitSev = c.severity
 				}
 			}
 		}
-	}
-	if score >= e.SemanticScore {
-		return &Match{
-			RuleID: "SEM-" + strings.Join(shortList(hitNames, 3), "+"),
-			Name:   "语义组合特征命中",
-			Category: hitCat, Severity: hitSev, Action: ActionBlock,
-			Layer: "semantic", Target: hitTgt, Score: score,
-			Excerpt: excerpt(strings.Join(hitNames, ",")),
+		if score >= e.SemanticScore && score >= best.Score {
+			hit = true
+			best = &Match{
+				RuleID: "SEM-" + strings.Join(shortList(hitNames, 3), "+"),
+				Name:   "语义组合特征命中", Category: hitCat, Severity: hitSev,
+				Action: ActionBlock, Layer: "semantic", Target: t, Score: score,
+				Excerpt: excerpt(strings.Join(hitNames, ",")),
+			}
 		}
+	}
+	if hit {
+		return best
 	}
 	return nil
 }
@@ -228,7 +262,10 @@ func builtinSemanticChecks() []semanticCheck {
 		{"sql:tautology", "sqli", SevHigh, 4, isTautology},
 		{"sql:time-based", "sqli", SevCritical, 3, contains("sleep(", "benchmark(", "pg_sleep(", "waitfor delay")},
 		{"sql:metadata", "sqli", SevMedium, 2, contains("information_schema", "sysobjects", "load_file(", "into outfile")},
-		{"sql:comment-stripped", "sqli", SevMedium, 1, contains("or 1=1", "and 1=1", "' or '", "\" or \"")},
+		// AUDIT M6：此处不再放裸 `' or '` / `" or "`。旧实现里这两个子串会与
+		// sql:tautology 的 4 分叠加成 5 分，导致「life ' or 'death」这类正常文本被拦；
+		// 现在恒真式必须由等式判断（1=1 / 'x'='x'）给出分数。
+		{"sql:comment-stripped", "sqli", SevMedium, 1, contains("or 1=1", "and 1=1")},
 		// 引号包裹的恒真式（'1'='1'）：与数字恒真式分开计分，避免单靠 4 分差一点不到阈值。
 		{"sql:quoted-eq", "sqli", SevHigh, 3, func(s string) bool {
 			for _, m := range reQuotedPair.FindAllStringSubmatch(strings.ToLower(s), -1) {
@@ -255,9 +292,11 @@ func builtinSemanticChecks() []semanticCheck {
 // 因此"两侧是否相同"（1=1、2=2）放到 isTautology 里用字符串比较完成。
 var reTautologyPair = regexp.MustCompile(`(\d+)\s*=\s*(\d+)`)
 
-// reQuotedPair 匹配 'x'='x' / "x"="x" 形式；是否恒真同样在 Go 侧比较。
+// reQuotedPair 匹配 'x'='x' 形式；是否恒真同样在 Go 侧比较。
 // W2 实测发现 `1' AND '1'='1' --` 能绕过，故补上这一形态。
-var reQuotedPair = regexp.MustCompile(`(['"])([^'"]{1,12})(['"])\s*=\s*(['"])([^'"]{1,12})(['"])`)
+// AUDIT 补：末尾闭合引号必须可选——经典 payload `1' OR '1'='1` 结束时没有第 4 个引号，
+// 旧正则要求成对闭合，导致 W2-SQLI-008 一直漏报。
+var reQuotedPair = regexp.MustCompile(`(['"])([^'"]{1,12})(['"])\s*=\s*(['"])([^'"]{1,12})(['"]?)`)
 
 // isTautology 判定 SQL 恒真式（1=1 / 'or'='or / '1'='1'）。
 func isTautology(s string) bool {
@@ -279,11 +318,16 @@ func isTautology(s string) bool {
 	return false
 }
 
-// BuiltinRules 返回 W1 内置的 12 条正则规则。
+// BuiltinRules 返回内置的正则规则（当前 16 条）。
 // 规则 ID 采用 BL-<类别>-<序号>，便于日志聚合与后续对抗报告统计。
+// 修改条数请同步 TestRuleCount 与 README / SPEC（AUDIT L6：历史上出现过 12 vs 16 的文档漂移）。
 func BuiltinRules() []Rule {
 	all := []Target{TargetPath, TargetQuery, TargetBody, TargetHeaders}
-	withUA := append([]Target{}, append(all, TargetUA)...)
+	// AUDIT M7：正文里正常讨论 javascript: 协议、或提到 nmap 的技术文章不该被拦，
+	// 这两类规则从 body 收窄到 path/query/headers。
+	noBody := []Target{TargetPath, TargetQuery, TargetHeaders}
+	// 扫描器指纹只出现在 UA 与自定义 header 上，落到 body/query 只会制造误报。
+	scannerTargets := []Target{TargetUA, TargetHeaders}
 	return []Rule{
 		{ID: "BL-SQLI-001", Name: "UNION 注入", Category: "sqli", Severity: SevHigh, Action: ActionBlock,
 			Targets: all, Pattern: `union\s+(all\s+)?select`},
@@ -298,7 +342,7 @@ func BuiltinRules() []Rule {
 		{ID: "BL-XSS-002", Name: "事件处理器注入", Category: "xss", Severity: SevHigh, Action: ActionBlock,
 			Targets: all, Pattern: `\bon(error|load|focus|blur|mouseover|click|toggle|animationstart|input|submit)\s*=`},
 		{ID: "BL-XSS-003", Name: "JS 伪协议", Category: "xss", Severity: SevHigh, Action: ActionBlock,
-			Targets: all, Pattern: `(javascript|vbscript)\s*:|data:text/html`},
+			Targets: noBody, Pattern: `(javascript|vbscript)\s*:|data:text/html`},
 		{ID: "BL-RCE-001", Name: "命令拼接", Category: "rce", Severity: SevCritical, Action: ActionBlock,
 			Targets: all, Pattern: `(;|\||&&)\s*(cat|ls|id|whoami|uname|ping|curl|wget|nc|bash|sh|cmd|powershell)\b`},
 		{ID: "BL-RCE-002", Name: "命令替换", Category: "rce", Severity: SevCritical, Action: ActionBlock,
@@ -318,6 +362,6 @@ func BuiltinRules() []Rule {
 		{ID: "BL-SSRF-001", Name: "SSRF 内网/元数据地址", Category: "ssrf", Severity: SevHigh, Action: ActionBlock,
 			Targets: all, Pattern: `(https?|gopher|dict|ftp|file)://(127\.\d|localhost|0\.0\.0\.0|169\.254\.169\.254|\[::1\]|10\.\d|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)`},
 		{ID: "BL-SCAN-001", Name: "扫描器指纹", Category: "scanner", Severity: SevMedium, Action: ActionBlock,
-			Targets: withUA, Pattern: `(sqlmap|nikto|nmap|masscan|nessus|acunetix|dirbuster|gobuster|nuclei|xray|zgrab)`},
+			Targets: scannerTargets, Pattern: `(sqlmap|nikto|nmap|masscan|nessus|acunetix|dirbuster|gobuster|nuclei|xray|zgrab)`},
 	}
 }

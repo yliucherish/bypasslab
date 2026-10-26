@@ -117,8 +117,19 @@ func (d *Driver) send(ctx context.Context, c payloads.Case) Result {
 
 	res.StatusCode = resp.StatusCode
 	res.RuleID = resp.Header.Get("X-BypassLab-Blocked")
-	// 拦截判定：403 + 带规则 ID 头。只看状态码会把上游自身的 403 误判成拦截。
-	res.Blocked = resp.StatusCode == http.StatusForbidden && res.RuleID != ""
+
+	// AUDIT P2-1：429 是限流响应，既不是"拦截"也不是"放行"。
+	// 旧实现把它当放行计入分母，会让拦截率凭空下降；现在显式记为执行错误，
+	// Summarize 不会把它算进攻击样本分母。
+	if resp.StatusCode == http.StatusTooManyRequests {
+		res.Err = "rate limited(429)：WAF 启用了 -rate，本轮矩阵不可用于拦截率统计"
+		return res
+	}
+
+	// 拦截判定：403（规则命中）或 413（body 超限） + 带规则 ID 头。
+	// 只看状态码会把上游自身的 403 误判成拦截（W2 的关键设计，有单测守住）。
+	res.Blocked = (resp.StatusCode == http.StatusForbidden ||
+		resp.StatusCode == http.StatusRequestEntityTooLarge) && res.RuleID != ""
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if strings.Contains(string(raw), `"layer":"semantic"`) {
 		res.Layer = "semantic"
@@ -130,15 +141,15 @@ func (d *Driver) send(ctx context.Context, c payloads.Case) Result {
 
 // Summary 是对结果矩阵的统计。
 type Summary struct {
-	Total        int
-	Attacks      int
-	Benign       int
-	AttackBlocked int
-	BenignBlocked int
-	Errors       int
-	ByCategory   map[string]catStat
-	ByRule       map[string]int
-	Bypasses     []Result // 未被拦截的攻击样本
+	Total          int
+	Attacks        int
+	Benign         int
+	AttackBlocked  int
+	BenignBlocked  int
+	Errors         int
+	ByCategory     map[string]catStat
+	ByRule         map[string]int
+	Bypasses       []Result // 未被拦截的攻击样本
 	FalsePositives []Result
 }
 

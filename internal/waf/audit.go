@@ -39,6 +39,7 @@ type Audit struct {
 	counts map[string]int // rule_id -> 次数
 	total  int
 	blocks int
+	allows int
 }
 
 // NewAudit 打开（或创建）日志文件；path 为空时只做内存计数。
@@ -60,11 +61,14 @@ func (a *Audit) Write(ev Event) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.total++
-	if ev.EventType == "waf_block" {
+	switch ev.EventType {
+	case "waf_block":
 		a.blocks++
 		if ev.RuleID != "" {
 			a.counts[ev.RuleID]++
 		}
+	case "waf_allow":
+		a.allows++
 	}
 	if a.file == nil {
 		return nil
@@ -89,6 +93,7 @@ func (a *Audit) Stats() map[string]any {
 	return map[string]any{
 		"total_requests": a.total,
 		"total_blocks":   a.blocks,
+		"total_allows":   a.allows,
 		"by_rule":        cp,
 	}
 }

@@ -16,10 +16,14 @@ jobs:
           go-version: '1.22'
       - name: go vet
         run: go vet ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: build
         run: go build ./...
+      # AUDIT P0-2：必须开 -race。此前 data race（/__waf/health 无锁读 passages）
+      # 正是因为 CI 没开 race 检测才一直没暴露。
       - name: test
-        run: go test ./... -v
+        run: go test -race ./... -v
       - name: baseline (smoke)
         run: |
           # bin/ 与 logs/ 被 .gitignore 忽略，干净检出时不存在，必须先建

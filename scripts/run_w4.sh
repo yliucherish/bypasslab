@@ -23,8 +23,12 @@ echo "== 3/5 第三轮语料（含 18 条未见变形）=="
   -csv out/w3_round3_matrix.csv -md out/w3_round3_report.md
 
 echo "== 4/5 渲染 HTML 报告（三轮对比）=="
+# v1.1 起三轮的定义改为：
+#   R1 = v1.0 规则在原始 108 条语料上的历史基线（79.8%，CSV 固化在仓库里）
+#   R2 = v1.1 审计修复后同一批语料（112 条，新增 4 条误报面样本）
+#   R3 = v1.1 规则 + 18 条未见变形（130 条）
 go run ./cmd/report \
-  -rounds "R1 基线:out/w2_matrix.csv,R2 补规则:out/w3_round2_matrix.csv,R3 换硬语料:out/w3_round3_matrix.csv" \
+  -rounds "R1 v1.0 基线:out/w2_matrix_v1.0.csv,R2 v1.1 修复:out/w2_matrix.csv,R3 换硬语料:out/w3_round3_matrix.csv" \
   -out out/w4_report.html
 
 echo "== 5/5 完成 =="
