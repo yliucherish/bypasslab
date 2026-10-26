@@ -30,6 +30,12 @@ func main() {
 	crs := flag.Bool("crs", false, "运行 OWASP CRS 回归测试转写集（第三方基准）")
 	flag.Parse()
 
+	// CRS 模式默认写独立文件，避免覆盖 R2 训练集矩阵（踩过一次：39% 数据盖掉了 100%）
+	if *crs && *csvOut == "out/w2_matrix.csv" {
+		*csvOut = "out/crs_matrix.csv"
+		*mdOut = "out/crs_report.md"
+	}
+
 	var cases []payloads.Case
 	switch {
 	case *holdout:
