@@ -27,6 +27,7 @@ func main() {
 	hard := flag.Bool("hard", false, "追加 W3 更难变形语料（用于检验泛化能力）")
 	fresh := flag.Bool("new", false, "追加 W4 全新一批语料（不参考任何已知缺口清单，检验真实泛化）")
 	holdout := flag.Bool("holdout", false, "运行冻结的 holdout 集（只报总数，刻意不报明细）")
+	crs := flag.Bool("crs", false, "运行 OWASP CRS 回归测试转写集（第三方基准）")
 	flag.Parse()
 
 	var cases []payloads.Case
@@ -34,6 +35,9 @@ func main() {
 	case *holdout:
 		// 冻结集：不进任何主流程，也不打印绕过明细（看了就想修，那就退化成训练集了）
 		cases = payloads.Holdout()
+	case *crs:
+		// 第三方基准：CRS 官方回归测试的转写集，正样本 + CRS 标记的负样本
+		cases = append(payloads.CRSCases(), payloads.CRSNegativeCases()...)
 	default:
 		cases = payloads.Corpus()
 		if *hard {

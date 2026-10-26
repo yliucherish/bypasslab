@@ -105,6 +105,9 @@ func (d *Driver) send(ctx context.Context, c payloads.Case) Result {
 	if c.UA != "" {
 		req.Header.Set("User-Agent", c.UA)
 	}
+	for k, v := range c.Headers {
+		req.Header.Set(k, v)
+	}
 
 	start := time.Now()
 	resp, err := d.Client.Do(req)

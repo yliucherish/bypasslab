@@ -23,7 +23,8 @@ type Case struct {
 	Query    string
 	Body     string
 	UA       string
-	IsAttack bool // false 表示良性对照样本，被拦截即视为误报
+	Headers  map[string]string // 额外请求头（CRS 样本常用自定义 header 作载体）
+	IsAttack bool              // false 表示良性对照样本，被拦截即视为误报
 }
 
 // ---- 变形器 ----
