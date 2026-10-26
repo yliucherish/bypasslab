@@ -4,6 +4,7 @@ package waf
 import (
 	"fmt"
 	"html"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -15,20 +16,30 @@ var (
 	reSQLLineComment  = regexp.MustCompile(`--[^\n]*`)
 	reWhitespace      = regexp.MustCompile(`\s+`)
 	reMultiSlash      = regexp.MustCompile(`/{2,}`)
+	// MySQL 可执行注释：/*!50000union*/ 会被数据库执行，剥离注释时必须保留内部语句，
+	// 否则攻击者把关键字藏进版本注释就能整体绕过（W3-HARD-SQLI-001）。
+	reMySQLVersionComment = regexp.MustCompile(`(?s)/\*!\d*\s*(.*?)\*/`)
 	// Log4Shell 的 ${lower:x} / ${upper:x} 混淆：展开成真实字符，
 	// 否则 ${${lower:j}ndi:...} 这类变形能绕过 jndi 特征。
 	reLower = regexp.MustCompile(`\$\{lower:([^}]*)\}`)
 	reUpper = regexp.MustCompile(`\$\{upper:([^}]*)\}`)
-	// AUDIT P1-1：Unicode / 十六进制转义（\u003c、\x3c）此前完全没有处理，
-	// 是 hard 语料里 18 条变形中的一条绕过路径。
+	// ${env:FOO:-j} 取默认值，外层 ${...} 保留，
+	// 使 ${${env:FOO:-j}ndi:ldap://} 还原成 ${jndi:ldap://}（W3-HARD-DESER-002）。
+	reEnvDefault = regexp.MustCompile(`\$\{env:[^}:]*:-([^}]*)\}`)
+	// AUDIT N2：只解 \uXXXX，不再解 \xXX。
+	// \x3c 作为正文里的"转义写法讨论"出现时会被误归一成 <，进而被 XSS 规则误拦；
+	// 现有语料（W3-HARD-XSS-002）用的是 \u 形态，去掉 \x 不影响检出。
 	reUnicodeEscape = regexp.MustCompile(`\\u([0-9a-fA-F]{4})`)
-	reHexEscape     = regexp.MustCompile(`\\x([0-9a-fA-F]{2})`)
+	// IIS 超长 UTF-8 编码的斜杠与点号（%c0%af → /，%c0%ae → .），
+	// 按字面替换，避免无效 UTF-8 字节流干扰后续解码（W3-HARD-TRAV-001）。
+	reOverlongSlash = regexp.MustCompile(`(?i)%c0%af`)
+	reOverlongDot   = regexp.MustCompile(`(?i)%c0%ae`)
 	// 用于 IP 字面量归一：只处理 URL 的 host 部分，避免误伤正文里的数字。
 	reURLHost = regexp.MustCompile(`(?i)\b(https?|gopher|dict|ftp|file)://([^/\s?#]+)`)
 )
 
 const (
-	// maxURLDecodeRounds 是 URL 解码轮数上限。AUDIT P1-1：旧值 3 轮会让 4 层编码
+	// maxURLDecodeRounds 是 URL 解码轮数上限。旧值 3 轮会让 4 层编码
 	// （%25252527）在第 3 轮后残留 %27 直接放行，这里放到 8 轮并改为解到不动点。
 	maxURLDecodeRounds = 8
 	// maxEntityRounds 是 HTML 实体解码轮数上限。旧值只解 1 轮，
@@ -39,26 +50,41 @@ const (
 // Normalize 把原始输入压成"攻击者最可能想表达的形态"，用于对抗编码/注释类绕过。
 //
 // 处理顺序（每一层都可能导致绕过，缺一层就漏检）：
-//  1. 多轮 URL 解码至不动点（应对 %25%32%35 这类多重编码），`+` 按空格处理（query 语义）
-//  2. 多轮 HTML 实体解码至不动点（应对 &amp;lt;script&amp;gt;）
-//  3. 展开 \u003c / \x3c 转义
-//  4. 展开 ${lower:x} / ${upper:x}（应对 Log4Shell 混淆）
-//  5. 去除 SQL 注释（/* */ 与 --），注释是绕过 WAF 正则的经典手段
-//  6. 压缩连续空白（UNION/**/SELECT → UNION SELECT）
-//  7. 折叠重复斜杠（应对路径遍历 // 变形）
-//  8. IP 字面量归一（十进制 / 十六进制 / 八进制 / 简写 → 点分十进制）
+//  1. 超长 UTF-8 斜杠/点号归一（%c0%af → /）
+//  2. 多轮 URL 解码至不动点（应对 %25%32%35 这类多重编码），`+` 按空格处理（query 语义）
+//  3. 多轮 HTML 实体解码至不动点（应对 &amp;lt;script&amp;gt;）
+//  4. 展开 \uXXXX 转义
+//  5. 再解一轮 HTML 实体（衔接 \u0026lt; 这类"转义解出实体"的组合）
+//  6. 展开 ${env:X:-y} 默认值、${lower:} / ${upper:}
+//  7. 展开 MySQL 可执行注释，再剥离普通 SQL 注释
+//  8. 压缩连续空白、折叠重复斜杠
+//  9. IP 字面量归一（十进制 / 十六进制 / 八进制 / 简写 / IPv6 映射 → 点分十进制）
 //
 // 说明：归一化不做语义还原；语义判定在 engine 的 Layer 2 完成。
 func Normalize(raw string) string {
-	return normalize(raw, true)
+	return normalize(raw, true, false)
 }
 
-// normalize 是核心实现；plusAsSpace 区分 query（+ 代表空格）与 path/body/UA（+ 是字面量）。
-// AUDIT L3：旧实现对所有部位都用 QueryUnescape，把 path 里的 "a+b" 误解成 "a b"。
-func normalize(raw string, plusAsSpace bool) string {
-	s := decodeURL(raw, plusAsSpace)
+// normalize 是核心实现。
+//
+// plusAsSpace 区分 query（+ 代表空格）与 path/body/UA（+ 是字面量）。
+// squashComments 决定块注释的处理方式：
+//   - false：替换为空格，保住词边界（UNION/**/SELECT → UNION SELECT）
+//   - true ：直接删除，把被拆开的关键字重新拼接（un/**/ion → union）
+//
+// 两种都是真实攻击手法，engine 侧同时匹配两份结果（见 normalizePair）。
+func normalize(raw string, plusAsSpace bool, squashComments bool) string {
+	s := raw
+	s = reOverlongSlash.ReplaceAllString(s, "/")
+	s = reOverlongDot.ReplaceAllString(s, ".")
+
+	s = decodeURL(s, plusAsSpace)
 	s = decodeHTMLEntities(s)
 	s = decodeEscapes(s)
+	// 转义可能解出新的 HTML 实体（\u0026lt; → &lt;），再解一轮衔接上。
+	s = decodeHTMLEntities(s)
+
+	s = reEnvDefault.ReplaceAllString(s, "$1")
 	// 反复展开，直到不再变化（应对嵌套 ${lower:${lower:j}}）
 	for i := 0; i < 3; i++ {
 		before := s
@@ -74,7 +100,16 @@ func normalize(raw string, plusAsSpace bool) string {
 			break
 		}
 	}
-	s = reSQLBlockComment.ReplaceAllString(s, " ")
+
+	// 先露出 MySQL 可执行注释里的语句，再按需剥离普通注释。
+	// 注意替换为 "$1" 而不是 " $1 "：注释常被用来切开关键字（/*!50000un*/ion），
+	// 前后补空格会让 "un" 与 "ion" 断开，反而绕过检测（W4-NEW-SQLI-002）。
+	s = reMySQLVersionComment.ReplaceAllString(s, "$1")
+	blockRepl := " "
+	if squashComments {
+		blockRepl = ""
+	}
+	s = reSQLBlockComment.ReplaceAllString(s, blockRepl)
 	s = reSQLLineComment.ReplaceAllString(s, " ")
 	s = strings.ReplaceAll(s, "#", " ")
 	s = reWhitespace.ReplaceAllString(s, " ")
@@ -85,6 +120,17 @@ func normalize(raw string, plusAsSpace bool) string {
 	s = strings.ReplaceAll(s, "\x00SCHEME\x00", "://")
 	s = normalizeIPLiterals(s)
 	return strings.TrimSpace(s)
+}
+
+// normalizePair 返回"注释替换为空格"与"注释直接删除"两个版本。
+// 两者相同时只返回一份，避免无谓翻倍。
+func normalizePair(raw string, plusAsSpace bool) string {
+	a := normalize(raw, plusAsSpace, false)
+	b := normalize(raw, plusAsSpace, true)
+	if a == b {
+		return a
+	}
+	return a + "\n" + b
 }
 
 // decodeURL 反复解码直到不再变化（有上限，防止病态输入）。
@@ -115,30 +161,23 @@ func decodeHTMLEntities(s string) string {
 	return s
 }
 
-// decodeEscapes 展开 \u003c 与 \x3c 形式转义。
+// decodeEscapes 展开 \u003c 形式转义（不解 \xXX，见 reUnicodeEscape 注释）。
 func decodeEscapes(s string) string {
 	if !strings.Contains(s, `\`) {
 		return s
 	}
-	s = reUnicodeEscape.ReplaceAllStringFunc(s, func(m string) string {
+	return reUnicodeEscape.ReplaceAllStringFunc(s, func(m string) string {
 		v, err := strconv.ParseUint(m[2:], 16, 32)
 		if err != nil {
 			return m
 		}
 		return string(rune(v))
 	})
-	s = reHexEscape.ReplaceAllStringFunc(s, func(m string) string {
-		v, err := strconv.ParseUint(m[2:], 16, 32)
-		if err != nil {
-			return m
-		}
-		return string(rune(v))
-	})
-	return s
 }
 
 // normalizeIPLiterals 把 URL 中的非常规 IP 写法统一成点分十进制。
-// 覆盖：2130706433（十进制）、0x7f000001（十六进制）、0177.0.0.1（八进制）、127.1（两段简写）。
+// 覆盖：2130706433（十进制）、0x7f000001（十六进制）、0177.0.0.1（八进制）、
+// 127.1（两段简写）、[::ffff:127.0.0.1]（IPv6 映射）。
 // 这些写法都能被浏览器/HTTP 客户端解析成 127.0.0.1，但绕得过按点分十进制写的正则。
 func normalizeIPLiterals(s string) string {
 	if !strings.Contains(s, "://") {
@@ -150,6 +189,17 @@ func normalizeIPLiterals(s string) string {
 			return m
 		}
 		host, port := splitHostPort(sub[2])
+
+		if strings.HasPrefix(host, "[") {
+			// IPv6 字面量：只有 IPv4-mapped 形态才归一，纯 IPv6 保持原样（规则另有覆盖）。
+			if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+				if v4 := ip.To4(); v4 != nil {
+					return sub[1] + "://" + v4.String() + port
+				}
+			}
+			return m
+		}
+
 		ip, ok := parseIPLiteral(host)
 		if !ok {
 			return m
@@ -158,9 +208,12 @@ func normalizeIPLiterals(s string) string {
 	})
 }
 
-// splitHostPort 拆分 host 与 :port（不处理 IPv6 字面量，可直接跳过的形式原样返回）。
+// splitHostPort 拆分 host 与 :port，兼容 [IPv6]:port 形式。
 func splitHostPort(host string) (string, string) {
 	if strings.HasPrefix(host, "[") {
+		if i := strings.IndexByte(host, ']'); i > 0 {
+			return host[:i+1], host[i+1:]
+		}
 		return host, ""
 	}
 	if i := strings.LastIndexByte(host, ':'); i > 0 {
@@ -176,10 +229,18 @@ func parseIPLiteral(h string) (string, bool) {
 	}
 	low := strings.ToLower(h)
 
-	// 单段：十进制 32 位整数 或 0x 十六进制
+	// 单段：0x 十六进制、前导 0 的八进制、或十进制 32 位整数
 	if !strings.Contains(h, ".") {
 		if strings.HasPrefix(low, "0x") {
 			if v, err := strconv.ParseUint(low[2:], 16, 32); err == nil {
+				return formatIPv4(uint32(v)), true
+			}
+			return "", false
+		}
+		// 前导 0 视为八进制（017700000001 = 2130706433 = 127.0.0.1）。
+		// 浏览器与部分 HTTP 客户端都按这个语义解析（W4-NEW-SSRF-001）。
+		if len(h) > 1 && h[0] == '0' && isDigits(h) {
+			if v, err := strconv.ParseUint(h[1:], 8, 32); err == nil {
 				return formatIPv4(uint32(v)), true
 			}
 			return "", false
@@ -289,23 +350,26 @@ type Request struct {
 }
 
 // Field 分部位返回归一化后的文本，供规则匹配与语义评分使用。
-// path / body / UA / headers 用不把 `+` 当空格的归一化（AUDIT L3 修复）。
+//
+// 每个部位返回"注释替换为空格"与"注释直接删除"两个版本（换行分隔）：
+// 攻击者两种手法都在用——UNION/**/SELECT 靠保空格还原，un/**/ion 靠删注释拼接还原，
+// 规则命中任一版本即可。path / body / UA / headers 用不把 `+` 当空格的归一化。
 func (r *Request) Field(t Target) string {
 	switch t {
 	case TargetPath:
-		return normalize(r.RawPath, false) + " " + normalize(r.Path, false)
+		return normalizePair(r.RawPath, false) + " " + normalizePair(r.Path, false)
 	case TargetQuery:
-		return normalize(r.Query, true)
+		return normalizePair(r.Query, true)
 	case TargetBody:
-		return normalize(r.Body, false)
+		return normalizePair(r.Body, false)
 	case TargetUA:
-		return normalize(r.UA, false)
+		return normalizePair(r.UA, false)
 	case TargetHeaders:
 		var b strings.Builder
 		for k, v := range r.Headers {
 			b.WriteString(k)
 			b.WriteString(": ")
-			b.WriteString(normalize(v, false))
+			b.WriteString(normalizePair(v, false))
 			b.WriteString("\n")
 		}
 		return b.String()

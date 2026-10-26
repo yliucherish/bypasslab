@@ -99,6 +99,8 @@ func (e *Engine) Rules() []Rule {
 }
 
 // Threshold 返回语义层当前的拦截阈值（供 health 端点与实验记录使用）。
+// 注意：无锁读取。SetThreshold 仅在启动期调用，此时还没有并发请求；
+// 若将来支持运行时调阈值，需要给 SemanticScore 加读写锁或改成 atomic。
 func (e *Engine) Threshold() int { return e.SemanticScore }
 
 // SetThreshold 覆盖语义层阈值。AUDIT P2-4：让"调权重 → 重跑矩阵"成为可复现实验，
@@ -187,7 +189,7 @@ func (e *Engine) inspectSemantic(req *Request, f fieldCache) *Match {
 				}
 			}
 		}
-		if score >= e.SemanticScore && score >= best.Score {
+		if score >= e.SemanticScore && score > best.Score {
 			hit = true
 			best = &Match{
 				RuleID: "SEM-" + strings.Join(shortList(hitNames, 3), "+"),
@@ -275,6 +277,9 @@ func builtinSemanticChecks() []semanticCheck {
 			}
 			return false
 		}},
+		// 括号包裹的恒真式（and (1)=(1)）：单独给 5 分独立定罪。
+		// 这种写法在正常业务里没有语义，误报面极小（W3-HARD-SQLI-004）。
+		{"sql:paren-tautology", "sqli", SevHigh, 5, isParenTautology},
 		{"xss:script-tag", "xss", SevHigh, 3, contains("<script", "<svg", "<iframe", "<img src=x")},
 		{"xss:event-handler", "xss", SevHigh, 2, contains("onerror=", "onload=", "onclick=", "onfocus=")},
 		{"xss:js-uri", "xss", SevMedium, 2, contains("javascript:", "data:text/html")},
@@ -297,6 +302,20 @@ var reTautologyPair = regexp.MustCompile(`(\d+)\s*=\s*(\d+)`)
 // AUDIT 补：末尾闭合引号必须可选——经典 payload `1' OR '1'='1` 结束时没有第 4 个引号，
 // 旧正则要求成对闭合，导致 W2-SQLI-008 一直漏报。
 var reQuotedPair = regexp.MustCompile(`(['"])([^'"]{1,12})(['"])\s*=\s*(['"])([^'"]{1,12})(['"]?)`)
+
+// reParenPair 匹配括号包裹的恒真式 (1)=(1)；是否恒真同样在 Go 侧比较。
+// 括号是绕过"数字=数字"正则最省事的办法，W3-HARD-SQLI-004 就栽在这里。
+var reParenPair = regexp.MustCompile(`\(\s*(\d+)\s*\)\s*=\s*\(\s*(\d+)\s*\)`)
+
+// isParenTautology 判定 and (1)=(1) 这类括号包裹的恒真式。
+func isParenTautology(s string) bool {
+	for _, m := range reParenPair.FindAllStringSubmatch(s, -1) {
+		if m[1] == m[2] {
+			return true
+		}
+	}
+	return false
+}
 
 // isTautology 判定 SQL 恒真式（1=1 / 'or'='or / '1'='1'）。
 func isTautology(s string) bool {

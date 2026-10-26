@@ -21,7 +21,7 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-// TestBuiltinRulesBlock 逐条验证 12 条内置规则都能命中典型 payload。
+// TestBuiltinRulesBlock 逐条验证内置规则（16 条中挑 12 条有典型 payload 的）能命中。
 func TestBuiltinRulesBlock(t *testing.T) {
 	e := NewEngine(nil)
 	cases := []struct {

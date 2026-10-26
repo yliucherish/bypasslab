@@ -78,13 +78,13 @@ func ua(id, cat, name, userAgent string) Case {
 	return Case{ID: id, Category: cat, Name: name, Method: "GET", Path: "/", UA: userAgent, IsAttack: true}
 }
 
-// Corpus 返回全量语料（约 120 条）。
+// Corpus 返回全量语料（112 条：84 攻击 + 28 良性对照）。
 func Corpus() []Case {
 	var cs []Case
 	add := func(list ...Case) { cs = append(cs, list...) }
 	n := func(prefix string, i int) string { return fmt.Sprintf("%s-%03d", prefix, i) }
 
-	// ========== SQL 注入（26 条）==========
+	// ========== SQL 注入（21 条）==========
 	sqli := []string{
 		"1 UNION SELECT username,password FROM users",
 		"1 UNION ALL SELECT NULL,NULL,NULL",
@@ -116,7 +116,7 @@ func Corpus() []Case {
 		q(n("W2-SQLI", 26), "sqli", "恒真式双重编码", "id=1%2527%2520or%25201%253D1", true),
 	)
 
-	// ========== XSS（16 条）==========
+	// ========== XSS（15 条）==========
 	xss := []string{
 		"<script>alert(1)</script>",
 		"<script src=//evil/x.js></script>",

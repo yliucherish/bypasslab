@@ -12,7 +12,9 @@ func TestNormalizeEncodingBypasses(t *testing.T) {
 		{"双重 HTML 实体", "&amp;lt;script&amp;gt;", "<script>"},
 		{"四层 URL 编码", "%25252527%25252520or%252525201%2525253D1", "' or 1=1"},
 		{"Unicode 转义", `\u003cscript\u003e`, "<script>"},
-		{"十六进制转义", `\x3cscript\x3e`, "<script>"},
+		// AUDIT N2：\xXX 不再解码——正文里讨论转义写法会被误归一成标签而误拦；
+		// 现有语料（W3-HARD-XSS-002）用的是 \u 形态，去掉 \x 不影响检出。
+		{"十六进制转义保持原样", `\x3cscript\x3e`, `\x3cscript\x3e`},
 		{"十进制 IP", "http://2130706433/admin", "http://127.0.0.1/admin"},
 		{"十六进制 IP", "http://0x7f000001/admin", "http://127.0.0.1/admin"},
 		{"八进制段 IP", "http://0177.0.0.1/admin", "http://127.0.0.1/admin"},

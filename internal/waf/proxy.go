@@ -178,23 +178,40 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 
 	// body 已被读走，回填供上游使用
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-	p.rp.ServeHTTP(rec, r)
 
-	// AUDIT P1-3：放行也落审计，event_type=waf_allow，兑现与 SentinelWatch 的契约。
+	// AUDIT N1：只有需要记录放行状态码时才包装 ResponseWriter。
+	// 包装器必须能被 http.ResponseController 沿 Unwrap 链解包，否则
+	// SSE 流式响应会失去实时性、WebSocket 升级会因取不到 Hijacker 返回 502。
 	if p.cfg.LogAllows {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		p.rp.ServeHTTP(rec, r)
 		p.writeEvent(r, clientIP, Event{
 			EventType: "waf_allow", Action: ActionPass,
 			StatusCode: rec.status, LatencyUS: time.Since(begin).Microseconds(),
 		})
+		return
 	}
+	p.rp.ServeHTTP(w, r)
 }
 
 // statusRecorder 捕获上游最终状态码，供放行审计记录。
+//
+// Unwrap 让 http.ResponseController（Go 1.20+）能找回底层的 Flusher / Hijacker；
+// Flush 兜住仍在使用类型断言的调用方。两者缺一都会让流式与升级类响应退化。
 type statusRecorder struct {
 	http.ResponseWriter
 	status      int
 	wroteHeader bool
+}
+
+// Unwrap 暴露底层 ResponseWriter，供 ResponseController 解包。
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
+// Flush 透传 Flush，保证 SSE / 流式响应不被包装器阻塞。
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (s *statusRecorder) WriteHeader(code int) {

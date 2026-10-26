@@ -25,11 +25,15 @@ func main() {
 	conc := flag.Int("c", 8, "并发数")
 	timeout := flag.Duration("timeout", 5*time.Second, "单请求超时")
 	hard := flag.Bool("hard", false, "追加 W3 更难变形语料（用于检验泛化能力）")
+	fresh := flag.Bool("new", false, "追加 W4 全新一批语料（不参考任何已知缺口清单，检验真实泛化）")
 	flag.Parse()
 
 	cases := payloads.Corpus()
 	if *hard {
 		cases = append(cases, payloads.HardCases()...)
+	}
+	if *fresh {
+		cases = append(cases, payloads.HardCases2()...)
 	}
 	if len(cases) == 0 {
 		log.Fatal("语料库为空")
