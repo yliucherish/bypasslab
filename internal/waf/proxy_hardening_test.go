@@ -1,7 +1,9 @@
 package waf
 
 import (
+	"bufio"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -38,9 +40,9 @@ func newProxyWith(t *testing.T, mut func(*Config)) (*Proxy, *int32) {
 	return p, &hits
 }
 
-// TestProxyRejectsOversizedBody AUDIT P0-1：
-// 超过 MaxBody 的请求必须 413 且不转发，不能截断后放行。
-func TestProxyRejectsOversizedBody(t *testing.T) {
+// TestOversizedBodyStreams v1.6 起：超 MaxBody 的 body 不再 413，
+// 而是走流式分块检测 + 原样转发（大文件上传不被挡）。
+func TestOversizedBodyStreams(t *testing.T) {
 	p, hits := newProxyWith(t, func(c *Config) { c.MaxBody = 16 })
 	srv := httptest.NewServer(p.Handler())
 	defer srv.Close()
@@ -50,19 +52,39 @@ func TestProxyRejectsOversizedBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("状态码 = %d, want 200（超限 body 应流式转发）", resp.StatusCode)
+	}
+	// newProxyWith 的 hits 计的是请求数：超限 body 被完整转发（上游命中 1 次）
+	if n := atomic.LoadInt32(hits); n != 1 {
+		t.Fatalf("上游命中次数 = %d, want 1", n)
+	}
+}
 
-	if resp.StatusCode != http.StatusRequestEntityTooLarge {
-		t.Fatalf("状态码 = %d, want 413", resp.StatusCode)
+// TestSneakyContentLengthTruncated 谎报 Content-Length（声明 ≤ MaxBody、实际更大）时，
+// Go http.Server 会把 body 截断到声明长度——多余的字节既到不了检测层，也到不了上游。
+// 用 newStreamProxy（按字节统计）验证：上游收到的字节数必须远小于实际发送量。
+func TestSneakyContentLengthTruncated(t *testing.T) {
+	_, srv, bytesHit := newStreamProxy(t, 16)
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := resp.Header.Get("X-BypassLab-Blocked"); got != "BL-OVERSIZE" {
-		t.Fatalf("拦截头 = %q, want BL-OVERSIZE", got)
+	defer conn.Close()
+	raw := "POST /api/upload HTTP/1.1\r\nHost: test\r\nContent-Length: 8\r\n\r\n" + strings.Repeat("A", 64)
+	if _, err := conn.Write([]byte(raw)); err != nil {
+		t.Fatal(err)
 	}
-	if n := atomic.LoadInt32(hits); n != 0 {
-		t.Fatalf("超限请求被转发到了上游 %d 次，应完全阻断", n)
+	br := bufio.NewReader(conn)
+	line, _ := br.ReadString('\n')
+	if !strings.Contains(line, "200") {
+		t.Fatalf("截断后的干净 body 不应被拦: %s", strings.TrimSpace(line))
 	}
-	if s := p.cfg.Audit.Stats(); s["total_blocks"].(int) != 1 {
-		t.Fatalf("超限未写审计: %+v", s)
+	// 实际发送 64 字节，上游收到的必须远小于此（标准库按 CL=8 截断）
+	if n := atomic.LoadInt32(bytesHit); n >= 64 {
+		t.Fatalf("多余字节透传到了上游（%d 字节）——谎报 Content-Length 不能让超额数据穿透", n)
 	}
 }
 

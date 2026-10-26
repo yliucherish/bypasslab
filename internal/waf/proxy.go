@@ -125,9 +125,39 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ---- 大 body / 分块传输：流式分块检测（v1.6）----
+	// 之前的行为是超过 MaxBody 直接 413——安全上干净，但会把正常的大文件上传一并挡掉。
+	// 流式模式：按块读取、与上一块尾部重叠拼接后检测、原样转发，内存占用恒定。
+	// 代价：命中时响应可能已经开始，无法回 403，只能断开连接（ReverseProxy 返回 502）+ 写审计。
+	if r.ContentLength > p.cfg.MaxBody || r.ContentLength == -1 {
+		sb := newScanningBody(r.Body, p.cfg.Engine, buildRequest(r, nil))
+		r.Body = sb
+		p.mu.Lock()
+		p.passages++
+		p.mu.Unlock()
+		// 注意：不包 statusRecorder——包装器会阻断流式转发（AUDIT N1 的教训）
+		p.rp.ServeHTTP(w, r)
+		if sb.blocked != nil {
+			p.writeEvent(r, clientIP, Event{
+				EventType: "waf_block", RuleID: sb.blocked.RuleID, RuleName: sb.blocked.Name,
+				Category: sb.blocked.Category, Severity: sb.blocked.Severity, Action: ActionBlock,
+				Layer: "stream", Target: TargetBody, Excerpt: sb.blocked.Excerpt, Score: sb.blocked.Score,
+				StatusCode: http.StatusBadGateway, LatencyUS: time.Since(begin).Microseconds(),
+			})
+		} else if p.cfg.LogAllows {
+			// 流式模式没有 recorder（不包装），StatusCode 记 0 表示"由上游决定、未捕获"
+			p.writeEvent(r, clientIP, Event{
+				EventType: "waf_allow", Action: ActionPass,
+				LatencyUS: time.Since(begin).Microseconds(),
+			})
+		}
+		return
+	}
+
+	// ---- 常规路径：全量读取 + 精确检测（可以回 403）----
 	body, err := readBodyLimited(r, p.cfg.MaxBody)
 	if err != nil {
-		// AUDIT P0-1：超限不再截断转发，直接 413，避免 MaxBody 之后的载荷绕过检测。
+		// 413 兜底：客户端谎报 Content-Length（声明小于 MaxBody、实际更大）时走到这里。
 		if errors.Is(err, ErrBodyTooLarge) {
 			p.writeEvent(r, clientIP, Event{
 				EventType: "waf_block", RuleID: "BL-OVERSIZE", RuleName: "请求体超过检查上限",
@@ -351,6 +381,72 @@ func parseTrustedProxies(spec []string) ([]*net.IPNet, error) {
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+// ---- 流式 body 检测（v1.6）----
+
+// streamOverlap 是分块检测时的重叠窗口：每块检测时带上上一块的尾部，
+// 防止攻击载荷恰好被块边界切开。8 KiB 能覆盖绝大多数单条 payload。
+const streamOverlap = 8 << 10
+
+// streamBlocked 表示流式检测命中了规则；作为 Read 的错误返回后，
+// ReverseProxy 会中断转发（此时响应可能已开始，无法回 403）。
+type streamBlocked struct{ match *Match }
+
+func (e *streamBlocked) Error() string { return "stream blocked: " + e.match.RuleID }
+
+// scanningBody 是边读边检测的 body Reader。
+//
+// 设计要点：
+//   - 每读到一块，与上一块尾部（streamOverlap）拼接后整体检测；
+//   - 命中后记录 match，后续所有 Read 返回错误，让 ReverseProxy 断开连接；
+//   - 不缓存整份 body，内存占用恒定（只有 overlap 窗口）；
+//   - 检测用的是「块 + 尾部重叠」而不是完整请求，因此 headers/query 的规则
+//     依然由全量路径覆盖，这里只补 body 的深层检测。
+type scanningBody struct {
+	src     io.ReadCloser
+	engine  *Engine
+	base    Request
+	overlap []byte
+	blocked *Match
+}
+
+func newScanningBody(src io.ReadCloser, e *Engine, base *Request) *scanningBody {
+	return &scanningBody{src: src, engine: e, base: *base}
+}
+
+// Close 透传给底层 body（ReverseProxy 结束时会调用）。
+func (s *scanningBody) Close() error {
+	if c, ok := s.src.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+func (s *scanningBody) Read(p []byte) (int, error) {
+	if s.blocked != nil {
+		return 0, &streamBlocked{s.blocked}
+	}
+	n, err := s.src.Read(p)
+	if n > 0 {
+		data := make([]byte, 0, len(s.overlap)+n)
+		data = append(data, s.overlap...)
+		data = append(data, p[:n]...)
+
+		req := s.base
+		req.Body = string(data)
+		if m := s.engine.Inspect(&req); m != nil {
+			s.blocked = m
+			return 0, &streamBlocked{m}
+		}
+
+		if len(data) > streamOverlap {
+			s.overlap = append(s.overlap[:0], data[len(data)-streamOverlap:]...)
+		} else {
+			s.overlap = append(s.overlap[:0], data...)
+		}
+	}
+	return n, err
 }
 
 // ---- 滑动窗口计数器限流（AUDIT：旧注释误称"令牌桶"）----
