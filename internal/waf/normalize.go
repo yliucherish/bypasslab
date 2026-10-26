@@ -123,9 +123,14 @@ func normalize(raw string, plusAsSpace bool, squashComments bool) string {
 }
 
 // normalizePair 返回"注释替换为空格"与"注释直接删除"两个版本。
-// 两者相同时只返回一份，避免无谓翻倍。
+//
+// 性能优化：绝大多数请求根本不含块注释，此时两版结果必然相同，
+// 所以先看原文有没有 `/*`，没有就只算一次——这一条把良性请求的检测耗时砍半。
 func normalizePair(raw string, plusAsSpace bool) string {
 	a := normalize(raw, plusAsSpace, false)
+	if !strings.Contains(raw, "/*") {
+		return a
+	}
 	b := normalize(raw, plusAsSpace, true)
 	if a == b {
 		return a

@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Severity 表示命中规则的危害等级，用于告警分级与统计。
@@ -56,7 +57,11 @@ type Match struct {
 //	Layer 2：语义评分（慢一点、抗变形、给出综合置信度）
 //
 // 任一层判定 block 即拦截；两层都放行才转发。
+//
+// 规则集支持运行时整体替换（热加载）：写入时创建新切片，读路径取快照后不再持有锁，
+// 因此不会出现"改规则时请求拿到半套规则"的情况。
 type Engine struct {
+	mu             sync.RWMutex
 	rules          []Rule
 	SemanticScore  int // 语义层拦截阈值
 	semanticChecks []semanticCheck
@@ -88,27 +93,49 @@ func NewEngine(rules []Rule) *Engine {
 // AddRule 编译并注册一条规则；正则非法时 panic（规则属于代码资产，启动即失败优于静默失效）。
 func (e *Engine) AddRule(r Rule) {
 	r.re = regexp.MustCompile("(?i)" + r.Pattern)
+	e.mu.Lock()
 	e.rules = append(e.rules, r)
+	e.mu.Unlock()
+}
+
+// SetRules 整体替换规则集（热加载入口）。传入的 Rule 应已编译 re 字段。
+func (e *Engine) SetRules(rules []Rule) {
+	e.mu.Lock()
+	e.rules = rules
+	e.mu.Unlock()
+}
+
+// rulesSnapshot 取规则切片快照。切片一旦发布就不再被修改，取到后可无锁遍历。
+func (e *Engine) rulesSnapshot() []Rule {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.rules
 }
 
 // Rules 返回已注册规则的副本，便于 /__waf/stats 或测试断言。
 func (e *Engine) Rules() []Rule {
-	out := make([]Rule, len(e.rules))
-	copy(out, e.rules)
+	snap := e.rulesSnapshot()
+	out := make([]Rule, len(snap))
+	copy(out, snap)
 	return out
 }
 
 // Threshold 返回语义层当前的拦截阈值（供 health 端点与实验记录使用）。
-// 注意：无锁读取。SetThreshold 仅在启动期调用，此时还没有并发请求；
-// 若将来支持运行时调阈值，需要给 SemanticScore 加读写锁或改成 atomic。
-func (e *Engine) Threshold() int { return e.SemanticScore }
+func (e *Engine) Threshold() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.SemanticScore
+}
 
 // SetThreshold 覆盖语义层阈值。AUDIT P2-4：让"调权重 → 重跑矩阵"成为可复现实验，
-// 而不是改代码重编译。
+// 而不是改代码重编译。热加载规则时也会同步更新。
 func (e *Engine) SetThreshold(n int) {
-	if n > 0 {
-		e.SemanticScore = n
+	if n <= 0 {
+		return
 	}
+	e.mu.Lock()
+	e.SemanticScore = n
+	e.mu.Unlock()
 }
 
 // fieldCache 缓存一次 Inspect 内的字段归一化结果。
@@ -128,7 +155,8 @@ func (c fieldCache) get(r *Request, t Target) string {
 // Inspect 依次跑两层检测。返回 nil 表示放行。
 func (e *Engine) Inspect(req *Request) *Match {
 	f := fieldCache{}
-	if m := e.inspectRegex(req, f); m != nil && m.Action == ActionBlock {
+	rules := e.rulesSnapshot()
+	if m := e.inspectRegex(rules, req, f); m != nil && m.Action == ActionBlock {
 		return m
 	}
 	if m := e.inspectSemantic(req, f); m != nil && m.Action == ActionBlock {
@@ -137,8 +165,8 @@ func (e *Engine) Inspect(req *Request) *Match {
 	return nil
 }
 
-func (e *Engine) inspectRegex(req *Request, f fieldCache) *Match {
-	for _, r := range e.rules {
+func (e *Engine) inspectRegex(rules []Rule, req *Request, f fieldCache) *Match {
+	for _, r := range rules {
 		for _, t := range r.Targets {
 			field := f.get(req, t)
 			if field == "" {
@@ -164,6 +192,7 @@ func (e *Engine) inspectRegex(req *Request, f fieldCache) *Match {
 // 旧实现把所有字段的分数加总到同一个 score，会出现"query 4 分 + body 无关 1 分 = 拦截"
 // 这种跨字段凑分，既抬高误报又让归因失准。
 func (e *Engine) inspectSemantic(req *Request, f fieldCache) *Match {
+	threshold := e.Threshold()
 	best := &Match{}
 	hit := false
 	for _, t := range []Target{TargetPath, TargetQuery, TargetBody, TargetUA, TargetHeaders} {
@@ -189,7 +218,7 @@ func (e *Engine) inspectSemantic(req *Request, f fieldCache) *Match {
 				}
 			}
 		}
-		if score >= e.SemanticScore && score > best.Score {
+		if score >= threshold && score > best.Score {
 			hit = true
 			best = &Match{
 				RuleID: "SEM-" + strings.Join(shortList(hitNames, 3), "+"),

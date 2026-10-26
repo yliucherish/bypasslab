@@ -30,7 +30,20 @@ func main() {
 	trusted := flag.String("trusted-proxies", "", "可信代理 IP/CIDR，逗号分隔；为空表示不采信 X-Forwarded-For")
 	logAllows := flag.Bool("log-allows", true, "放行请求也写 JSONL（event_type=waf_allow）")
 	threshold := flag.Int("semantic-threshold", 0, "语义层拦截阈值，0 表示使用内置默认值（5）")
+	rulesPath := flag.String("rules", "", "规则配置文件（JSON）；为空则用内置规则；开启后自动热加载")
+	dumpRules := flag.String("dump-rules", "", "把内置规则导出为 JSON 配置后退出（生成默认配置用）")
 	flag.Parse()
+
+	// 导出模式：只生成配置文件，不起服务
+	if *dumpRules != "" {
+		base := waf.NewEngine(nil)
+		rs := waf.BuildRuleSet(base.Rules(), base.Threshold())
+		if err := waf.SaveRuleSet(*dumpRules, rs); err != nil {
+			log.Fatalf("导出规则失败: %v", err)
+		}
+		log.Printf("已导出 %d 条规则到 %s", len(rs.Rules), *dumpRules)
+		return
+	}
 
 	u, err := url.Parse(*upstream)
 	if err != nil || u.Scheme == "" {
@@ -44,7 +57,17 @@ func main() {
 	defer audit.Close()
 
 	engine := waf.NewEngine(nil)
-	engine.SetThreshold(*threshold) // <=0 时保持默认阈值，不覆盖
+	if *rulesPath != "" {
+		rules, th, err := waf.LoadRuleSet(*rulesPath)
+		if err != nil {
+			log.Fatalf("加载规则配置失败（%s）: %v", *rulesPath, err)
+		}
+		engine.SetRules(rules)
+		engine.SetThreshold(th)
+		log.Printf("已加载外部规则：%s（%d 条，阈值 %d）", *rulesPath, len(rules), th)
+	} else {
+		engine.SetThreshold(*threshold) // <=0 时保持默认阈值，不覆盖
+	}
 
 	proxy, err := waf.NewProxy(waf.Config{
 		Upstream:       u,
@@ -72,6 +95,20 @@ func main() {
 	// 等于每次正常退出都打一条"服务退出"错误日志。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// 规则热加载：轮询文件 mtime（不用 fsnotify，保持零第三方依赖）。
+	// 校验失败只打日志、保留旧规则——绝不能让一条写错的规则把 WAF 变成透明代理。
+	if *rulesPath != "" {
+		watcher := &waf.RuleFileWatcher{
+			Path:   *rulesPath,
+			Engine: engine,
+			OnError: func(err error) {
+				log.Printf("规则热加载失败（保留旧规则继续服务）: %v", err)
+			},
+		}
+		watcher.Start(ctx.Done())
+		log.Printf("规则热加载已启用：%s（修改后约 2 秒生效）", *rulesPath)
+	}
 
 	go func() {
 		<-ctx.Done()

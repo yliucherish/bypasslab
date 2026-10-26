@@ -1,0 +1,227 @@
+{
+  "version": "1.0",
+  "semantic_threshold": 5,
+  "rules": [
+    {
+      "id": "BL-SQLI-001",
+      "name": "UNION 注入",
+      "category": "sqli",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "union\\s+(all\\s+)?select"
+    },
+    {
+      "id": "BL-SQLI-002",
+      "name": "报错注入函数",
+      "category": "sqli",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "(extractvalue|updatexml|geometrycollection)\\s*\\("
+    },
+    {
+      "id": "BL-SQLI-003",
+      "name": "布尔/时间盲注",
+      "category": "sqli",
+      "severity": "critical",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "(sleep|benchmark|pg_sleep)\\s*\\(\\s*\\d"
+    },
+    {
+      "id": "BL-SQLI-004",
+      "name": "写文件 / 数据库结构破坏",
+      "category": "sqli",
+      "severity": "critical",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "into\\s+(out|dump)file|;\\s*(drop|alter|truncate|create)\\s+(table|database|user|index)"
+    },
+    {
+      "id": "BL-XSS-001",
+      "name": "Script 标签",
+      "category": "xss",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "\u003cscript[^\u003e]*\u003e"
+    },
+    {
+      "id": "BL-XSS-002",
+      "name": "事件处理器注入",
+      "category": "xss",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "\\bon(error|load|focus|blur|mouseover|click|toggle|animationstart|input|submit)\\s*="
+    },
+    {
+      "id": "BL-XSS-003",
+      "name": "JS 伪协议",
+      "category": "xss",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "headers"
+      ],
+      "pattern": "(javascript|vbscript)\\s*:|data:text/html"
+    },
+    {
+      "id": "BL-RCE-001",
+      "name": "命令拼接",
+      "category": "rce",
+      "severity": "critical",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "(;|\\||\u0026\u0026)\\s*(cat|ls|id|whoami|uname|ping|curl|wget|nc|bash|sh|cmd|powershell)\\b"
+    },
+    {
+      "id": "BL-RCE-002",
+      "name": "命令替换",
+      "category": "rce",
+      "severity": "critical",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "(\\$\\([^)]{1,40}\\)|`[^`]{1,40}`)"
+    },
+    {
+      "id": "BL-TRAV-001",
+      "name": "路径遍历",
+      "category": "path-traversal",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "(\\.\\./|\\.\\.\\\\){2,}"
+    },
+    {
+      "id": "BL-TRAV-002",
+      "name": "敏感文件读取",
+      "category": "path-traversal",
+      "severity": "critical",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "(/etc/passwd|/etc/shadow|win\\.ini|boot\\.ini|\\.\\.%2f)"
+    },
+    {
+      "id": "BL-DESER-001",
+      "name": "JNDI 注入（Log4Shell 特征）",
+      "category": "deserialization",
+      "severity": "critical",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "\\$\\{jndi:(ldap|rmi|dns|iiop)"
+    },
+    {
+      "id": "BL-DESER-002",
+      "name": "Fastjson autoType",
+      "category": "deserialization",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "\"@type\"\\s*:\\s*\""
+    },
+    {
+      "id": "BL-DESER-003",
+      "name": "Java 序列化魔数（base64）",
+      "category": "deserialization",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "rO0AB[A-Za-z0-9+/]{8,}"
+    },
+    {
+      "id": "BL-SSRF-001",
+      "name": "SSRF 内网/元数据地址",
+      "category": "ssrf",
+      "severity": "high",
+      "action": "block",
+      "targets": [
+        "path",
+        "query",
+        "body",
+        "headers"
+      ],
+      "pattern": "(https?|gopher|dict|ftp|file)://(127\\.\\d|localhost|0\\.0\\.0\\.0|169\\.254\\.169\\.254|\\[::1\\]|10\\.\\d|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.)"
+    },
+    {
+      "id": "BL-SCAN-001",
+      "name": "扫描器指纹",
+      "category": "scanner",
+      "severity": "medium",
+      "action": "block",
+      "targets": [
+        "ua",
+        "headers"
+      ],
+      "pattern": "(sqlmap|nikto|nmap|masscan|nessus|acunetix|dirbuster|gobuster|nuclei|xray|zgrab)"
+    }
+  ]
+}
