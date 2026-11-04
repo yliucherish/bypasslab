@@ -76,23 +76,49 @@ func TestProxyStreamsSSE(t *testing.T) {
 
 // TestRateLimiterCleanupOnRealPath AUDIT N3：
 // 覆盖 allow() 内部的真实清理触发路径（count>阈值 且 距上次清理超过间隔）。
+//
+// 这个用例曾经跟挂钟赛跑：窗口取 2ms、灌 1034 条，指望整个 for 循环在 2ms 内
+// 跑完（这样清理触发时没有 key 过期，size 稳定停在 1034）。本地跑得够快，
+// 换成 `-race` 就慢到 40ms 上下，中途 len>阈值 触发的清理真的删掉了过期 key，
+// size 掉到 567，断言失败——**测试测的是机器速度，不是清理逻辑**。
+//
+// 现在改成不依赖任何时间流逝：
+//   1) 窗口取 1 分钟，且先把 lastSweep 顶到未来，灌入阶段绝不触发清理；
+//   2) 灌满后直接把这批记录的时间戳改写成"很久以前"，等价于"这些 IP 早就不来了"
+//      —— 效果和 sleep 一样，但不受调度抖动影响；
+//   3) 把 lastSweep 拨回过去，再 allow 一次，清理必然发生且必然删空。
 func TestRateLimiterCleanupOnRealPath(t *testing.T) {
-	l := newRateLimiter(1000, 2*time.Millisecond)
+	const window = time.Minute
+	l := newRateLimiter(1000, window)
+
+	// 灌入阶段禁用清理，条目数才是确定的（否则 -race 下会被提前扫掉）。
+	l.mu.Lock()
+	l.lastSweep = time.Now().Add(time.Hour)
+	l.mu.Unlock()
+
 	for i := 0; i < cleanupThreshold+10; i++ {
 		l.allow(fmt.Sprintf("10.2.%d.%d", i/256, i%256))
 	}
-	if l.size() < cleanupThreshold {
-		t.Fatalf("未灌满限流器: %d", l.size())
+	if got := l.size(); got != cleanupThreshold+10 {
+		t.Fatalf("灌入后应跟踪 %d 个 IP，实得 %d", cleanupThreshold+10, got)
 	}
-	// 让所有窗口过期，并把 lastSweep 拨到过去，使下一次 allow 触发清理
-	time.Sleep(10 * time.Millisecond)
+
+	// 把这批记录整体推到窗口之外。
 	l.mu.Lock()
-	l.lastSweep = time.Now().Add(-2 * time.Second)
+	stale := time.Now().Add(-2 * window)
+	for ip, list := range l.hits {
+		for i := range list {
+			list[i] = stale
+		}
+		l.hits[ip] = list
+	}
+	l.lastSweep = time.Now().Add(-2 * cleanupInterval)
 	l.mu.Unlock()
 
 	l.allow("10.99.99.99")
-	if got := l.size(); got > 2 {
-		t.Fatalf("触发清理后仍剩 %d 个 IP，惰性清理未生效", got)
+	// 新来的 IP 留着，被清理掉的老 key 一个不剩。
+	if got := l.size(); got != 1 {
+		t.Fatalf("触发清理后应只剩 1 个活跃 IP，实得 %d（惰性清理未生效）", got)
 	}
 }
 
