@@ -83,10 +83,10 @@ func TestProxyStreamsSSE(t *testing.T) {
 // size 掉到 567，断言失败——**测试测的是机器速度，不是清理逻辑**。
 //
 // 现在改成不依赖任何时间流逝：
-//   1) 窗口取 1 分钟，且先把 lastSweep 顶到未来，灌入阶段绝不触发清理；
-//   2) 灌满后直接把这批记录的时间戳改写成"很久以前"，等价于"这些 IP 早就不来了"
-//      —— 效果和 sleep 一样，但不受调度抖动影响；
-//   3) 把 lastSweep 拨回过去，再 allow 一次，清理必然发生且必然删空。
+//  1. 窗口取 1 分钟，且先把 lastSweep 顶到未来，灌入阶段绝不触发清理；
+//  2. 灌满后直接把这批记录的时间戳改写成"很久以前"，等价于"这些 IP 早就不来了"
+//     —— 效果和 sleep 一样，但不受调度抖动影响；
+//  3. 把 lastSweep 拨回过去，再 allow 一次，清理必然发生且必然删空。
 func TestRateLimiterCleanupOnRealPath(t *testing.T) {
 	const window = time.Minute
 	l := newRateLimiter(1000, window)
