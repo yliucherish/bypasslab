@@ -5,6 +5,11 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  # 手动触发：网页 Actions 页面的 "Run workflow" 按钮。
+  # 加这个的直接原因：2026-11-05 run #6 创建后 8 分 16 秒里一次都没被分配到 runner，
+  # 整轮却被判成 failure（job 始终 queued、steps 为空）。那种情况下不想为了重跑
+  # 而塞一个空提交，需要一个不需要改代码的入口。
+  workflow_dispatch:
 
 jobs:
   build-test:
