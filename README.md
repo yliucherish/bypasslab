@@ -128,7 +128,7 @@ shell 元字符、命令名、`../` 序列、敏感文件、Java 反序列化魔
 | XSS / RCE / 遍历 | script 标签、`;cat /etc/passwd`、`../../etc/passwd` | 3/3 拦截 |
 | 反序列化 / 扫描器 | `${jndi:ldap://...}`、Fastjson `@type`、sqlmap UA | 3/3 拦截 |
 
-单元测试：`go test ./...` **53 个测试函数全绿**（v1.4；CI 以 `go test -race` 运行，
+单元测试：`go test ./...` **58 个测试函数全绿**（v1.6，2026-11-10 实测 `go test ./... -v | grep -c '^--- PASS'` = 58；CI 以 `go test -race` 运行，
 覆盖归一化 22 组、规则逐条、语义层、误报面、规则数漂移、命中部位归因、代理端到端、
 body 超限、限流与 XFF 伪造、审计 allow/block、SSE 流式透传、并发读取、规则集加载校验与热加载、
 报告 CSV 容错）。另有 4 个 benchmark（见[性能](#性能单核实测)）。
