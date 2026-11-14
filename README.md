@@ -439,6 +439,31 @@ go test -bench . -benchmem ./internal/waf   # 性能基准
 > 这次审计最值得说的一点：**我们自己在文档里列了 9 条"已知绕过"，却没发现 body 超限能整体绕过检测**。
 > 规则层的缺口看得见，实现层的洞看不见——这也是后来把 `-race` 和"超限 body"写进 CI 与单测的原因。
 
+## 语料导出（供跨项目评测）
+
+`out/*.csv` 是给「WAF 拦不拦」看的：载荷被 `truncate(payload, 200)` 截断，
+而且只留一个 `query_or_body` 字段——**UA 与自定义 Header 全丢**。偏偏本项目有
+5 条 JNDI 载荷只放在 User-Agent 里（`W2-DESER-1..5`），拿 CSV 去做下游检测评测
+会把它们判成空载荷，制造假漏检。
+
+所以单独提供一份完整导出：
+
+```bash
+go run ./cmd/export -out out/corpus_full.json
+```
+
+**228 条**（corpus 112 / CRS 59 / CRS 负样本 8 / hard 18 / hard2 12 / holdout 19），
+保留完整 `query` / `body` / `ua` / `headers`。同一个 ID 出现在两个集里会直接报错
+退出——否则下游按 ID 聚合时会把两条样本静默合并，分母错了还看不出来。
+
+> **下游消费方**：[`sentinelwatch/bench/run_crosscheck.py`](../sentinelwatch/bench/run_crosscheck.py)
+> 拿这份语料去打自己的检测规则，测「我造的绕过载荷，我的 IDS 认不认」。
+> 结果在那边 `BENCHMARK.md` §2.8：检测范围内 58/117 = **49.6%**，
+> 并定位到一个 `+` 编码归一化缺口。
+>
+> 导出的 JSON 也随仓库提交（`out/corpus_full.json`），没装 Go 的人也能直接
+> 复核对端的数字。
+
 ## 目录结构
 
 ```
@@ -447,6 +472,7 @@ bypasslab/
 ├── cmd/echo/         # 本地靶场（无过滤回显，仅供授权测试）
 ├── cmd/attack/       # W2 对抗驱动器（批量打 WAF，出矩阵与报告）
 ├── cmd/report/       # HTML 报告生成（多轮对比 + SVG 图表）
+├── cmd/export/       # 导出完整语料 JSON（供跨项目评测，见下一节）
 ├── internal/waf/     # 核心：归一化 / 规则引擎 / 审计 / 反向代理
 ├── internal/payloads/# W2 攻击语料库（含良性对照组）
 ├── internal/attack/  # W2 驱动器与统计
